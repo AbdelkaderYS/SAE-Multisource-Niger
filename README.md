@@ -133,18 +133,6 @@ M3 achieves the lowest between-area variance component (sigma2_v = 0.000086), in
 
 ---
 
-## Relevance to SAESDGs-EU (Utrecht University, WP2)
-
-| WP2 Objective | Implementation in this project |
-|---|---|
-| Non-traditional data as auxiliary variables | MODIS NDVI + VIIRS in Fay-Herriot models |
-| Probability + non-probability data integration | GPS-based IPW (Chen et al. 2020) |
-| Record linkage for multisource integration | fastLink Fellegi-Sunter on real DHS files |
-| Data governance and privacy protection | Gaussian mechanism DP on real EBLUP estimates |
-| West African poverty context | DHS Niger 2012, aligned with Edochie et al. (2025) |
-
----
-
 ## References
 
 - Chen, Y. et al. (2020). Doubly robust inference for non-probability samples. *JRSS-B* 82(2), 391-411.
