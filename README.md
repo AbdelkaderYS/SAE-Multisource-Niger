@@ -12,7 +12,7 @@ Integrating Survey, Administrative and Satellite Data with Privacy-Preserving Me
 
 This project implements a **multisource Small Area Estimation (SAE) framework** for subnational MPI poverty monitoring in Niger, using DHS Niger 2012 (10,750 households). It integrates four types of auxiliary data into Fay-Herriot area-level models and applies Differential Privacy to protect disaggregated estimates.
 
-The project is a methodological proof of concept directly relevant to **Work Package 2** of the SAESDGs-EU ERC Starting Grant (Utrecht University, PI: Dr. Angelo Moretti), which addresses non-traditional data sources and multisource statistics for subnational SDG monitoring.
+This project contributes to the literature on multisource SAE for official statistics and subnational SDG monitoring in data-scarce contexts.
 
 ---
 
