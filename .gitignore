@@ -1,0 +1,24 @@
+# DHS microdata -- confidentiel
+data/raw/*.DTA
+data/raw/*.dta
+data/raw/*.shp
+data/raw/*.shx
+data/raw/*.dbf
+data/raw/*.prj
+data/raw/*.cpg
+data/raw/*.zip
+data/raw/*.ZIP
+
+# Données individuelles traitées
+data/processed/dhs_household_data.rds
+
+# R environment
+renv/library/
+.Rproj.user/
+.Rhistory
+.RData
+*.Rproj
+
+# OS
+.DS_Store
+Thumbs.db
