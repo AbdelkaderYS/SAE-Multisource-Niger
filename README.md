@@ -66,9 +66,9 @@ PRIVACY-PRESERVING OUTPUT
 
 | Source | Type | Variables | Access |
 |---|---|---|---|
-| DHS Niger 2012 | Probability survey | MPI dimensions | dhsprogram.com — free registration |
+| DHS Niger 2012 | Probability survey | MPI dimensions | dhsprogram.com - free registration |
 | INS Niger RGPH 2012 | Census | Regional urban share, literacy, electrification | stat-niger.org |
-| World Bank Open Data | National statistics | Literacy, electricity, child mortality, GDP | API — no key required |
+| World Bank Open Data | National statistics | Literacy, electricity, child mortality, GDP | API - no key required |
 | MODIS MOD13A3 v6.1 | Satellite | NDVI vegetation index | earthdata.nasa.gov |
 | VIIRS VNP46A3 | Satellite | Nighttime lights | NOAA/NGDC |
 | DHS GPS clusters | Geographic | 476 cluster coordinates (Niger 2012) | dhsprogram.com — free registration |
@@ -132,7 +132,7 @@ in `data/raw/`, scripts 01–03 use real microdata automatically.
 
 ## Key Results
 
-### 1. Model Comparison — Fay-Herriot REML (D = 8 regions)
+### 1. Model Comparison: Fay-Herriot REML (D = 8 regions)
 
 | Model | Aux sources | N pred. | sigma2\_v | AIC | BIC | Mean CV |
 |---|---|---|---|---|---|---|
@@ -207,7 +207,7 @@ framework under conditions where SAE gains are expected.
 
 ---
 
-### 2. Record Linkage — Probabilistic Matching (fastLink)
+### 2. Record Linkage: Probabilistic Matching (fastLink)
 
 Real DHS data: NIHR61FL × NIIR61FL linked on region, urban/rural, and
 education level. Results: 987 predicted pairs, precision = 0.026,
@@ -226,7 +226,7 @@ record linkage as the integration strategy for non-probability sources
 
 ---
 
-### 3. GPS Bias Correction — Non-Probability Source Reweighting
+### 3. GPS Bias Correction: Non-Probability Source Reweighting
 
 Real GPS cluster data: NIGE61FL.shp, 476 clusters. Distance-based IPW
 corrects for the accessibility gradient in satellite coverage:
@@ -241,7 +241,7 @@ that satellite data systematically over-represent accessible urban areas in
 Niger's territorial coverage. IPW correction using GPS distance as proxy
 for inclusion probability is a valid approach for this type of bias
 (Chen et al. 2020), though it relies on the assumption that haversine
-distance to Niamey adequately captures accessibility — a simplification
+distance to Niamey adequately captures accessibility, a simplification
 that would require ground-truth validation for production use.
 
 ---
@@ -280,7 +280,7 @@ poverty rates in Niger given the sample sizes available (n\_i ≥ 722).
 **D = 8 is the binding constraint throughout this project.** It determines
 the boundary REML behavior, limits the number of predictors in each model,
 and restricts the bootstrap MSE estimation. This is not a methodological
-flaw — it is the statistical reality of Niger's administrative structure
+flaw, it is the statistical reality of Niger's administrative structure
 for area-level SAE. The appropriate response is:
 
 1. Working at commune or department level (D ≈ 50–70) where data allow
@@ -318,8 +318,8 @@ These extensions define the research agenda that this project motivates.
 
 ## Author
 
-**Abdel Kader Younoussi Saley**
-MSc Mathematical Sciences (Data Science) — AIMS Rwanda (full merit scholarship)  
-MSc Applied Statistics — University of Constantine 1
-Research Collaborator, AIMS Rwanda \enspace\textbf{|}\enspace
-Former Statistician Intern, UNECA West Africa (6 months - to February 2026)[Mail](saley.younoussi@aims.ac.rw) | [LinkedIn](https://linkedin.com/in/abdelkader-saley-31863b213)
+**Abdel Kader Younoussi Saley**  
+MSc Applied Statistics - University of Constantine 1 
+MSc Mathematical Sciences (Data Science)- AIMS Rwanda (full merit scholarship)  
+Research Collaborator, AIMS Rwanda | Former Statistician Intern, UNECA West Africa (to February 2026)  
+[Email](mailto:abdelkader.saley@aims.ac.rw) | [LinkedIn](https://linkedin.com/in/abdelkader-saley-31863b213)
