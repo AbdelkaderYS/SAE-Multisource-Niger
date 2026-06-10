@@ -1,0 +1,133 @@
+---
+title: "Exploration NDVI MODIS et relation avec la richesse"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = "center")
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(ggplot2)
+  library(sf)
+})
+```
+
+## Charger les données
+
+Ce notebook nécessite que le script `scripts/telecharger_modis.R` ait déjà été exécuté.
+
+```{r}
+ndvi <- read.csv("data/processed/ndvi_dept.csv")
+direct <- read.csv("data/processed/direct_estimates_dept.csv")
+admin2 <- sf::st_read("data/raw/ner_admin2.shp", quiet = TRUE) %>%
+  mutate(dept_id = adm2_pcode)
+```
+
+```{r}
+cat("Départements avec NDVI :", nrow(ndvi), "\n")
+cat("Départements avec estimateurs directs :", nrow(direct), "\n")
+
+# Fusion
+sae <- direct %>%
+  left_join(ndvi, by = "dept_id") %>%
+  left_join(admin2 %>% select(dept_id, adm1_name, geometry), by = "dept_id")
+
+cat("Départements après fusion :", nrow(sae), "\n")
+```
+
+---
+
+## Distribution du NDVI MODIS
+
+```{r ndvi-hist}
+ggplot(ndvi, aes(x = ndvi_mean)) +
+  geom_histogram(bins = 20, fill = "#2ca02c", alpha = 0.8, color = "white") +
+  labs(
+    title    = "Distribution du NDVI MODIS moyen (2011-2012)",
+    subtitle = "Moyenne sur 24 mois mensuels (MOD13A3)",
+    x = "NDVI moyen", y = "Nombre de départements"
+  ) +
+  theme_bw()
+```
+
+```{r}
+summary(ndvi$ndvi_mean)
+```
+
+---
+
+## Carte du NDVI par département
+
+```{r ndvi-map, fig.height=6, fig.width=7}
+admin2_ndvi <- admin2 %>%
+  left_join(ndvi, by = "dept_id")
+
+ggplot() +
+  geom_sf(data = admin2_ndvi, aes(fill = ndvi_mean), color = "white", linewidth = 0.2) +
+  scale_fill_gradient(low = "#ffffcc", high = "#006837", name = "NDVI") +
+  labs(
+    title    = "NDVI MODIS moyen par département (2011-2012)",
+    subtitle = "Données MOD13A3, 1 km de résolution",
+    x = "Longitude", y = "Latitude"
+  ) +
+  theme_bw()
+```
+
+---
+
+## Relation NDVI vs Richesse
+
+```{r ndvi-vs-wealth}
+sae_plot <- sae %>% filter(!is.na(ndvi_mean), !is.na(direct_mean))
+
+ggplot(sae_plot, aes(x = ndvi_mean, y = direct_mean)) +
+  geom_point(aes(size = n_clusters), alpha = 0.6, color = "#1f77b4") +
+  geom_smooth(method = "lm", se = TRUE, color = "#d62728", fill = "#d62728", alpha = 0.2) +
+  labs(
+    title    = "NDVI vs Richesse moyenne par département",
+    subtitle = "1 point = 1 département, taille = nombre de clusters",
+    x = "NDVI moyen (MODIS)", y = "Richesse moyenne (DHS)"
+  ) +
+  theme_bw()
+```
+
+```{r}
+cor_val <- cor(sae_plot$ndvi_mean, sae_plot$direct_mean, use = "complete.obs")
+cat("Corrélation de Pearson :", round(cor_val, 3), "\n")
+cat("R² linéaire :", round(cor_val^2 * 100, 1), "%\n")
+```
+
+---
+
+## NDVI vs Urbanisation
+
+```{r ndvi-vs-urban}
+ggplot(sae_plot, aes(x = urban_pct, y = ndvi_mean)) +
+  geom_point(aes(size = n_clusters), alpha = 0.6, color = "#2ca02c") +
+  geom_smooth(method = "lm", se = FALSE, color = "#d62728") +
+  labs(
+    title    = "NDVI vs Taux d'urbanisation",
+    subtitle = "Vérification de multicolinéarité",
+    x = "Taux d'urbanisation (%)", y = "NDVI moyen"
+  ) +
+  theme_bw()
+```
+
+```{r}
+cor_uv <- cor(sae_plot$ndvi_mean, sae_plot$urban_pct, use = "complete.obs")
+cat("Corrélation NDVI ~ urban_pct :", round(cor_uv, 3), "\n")
+```
+
+---
+
+## Comparaison : départements avec/sans NDVI
+
+```{r}
+cat("Nombre de départements avec NDVI :", sum(!is.na(ndvi$ndvi_mean)), "\n")
+cat("Nombre de départements sans NDVI :", sum(is.na(ndvi$ndvi_mean)), "\n")
+
+if (any(is.na(ndvi$ndvi_mean))) {
+  cat("\nDépartements sans NDVI :\n")
+  print(ndvi %>% filter(is.na(ndvi_mean)) %>% select(dept_id, dept_name))
+}
+```

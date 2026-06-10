@@ -1,0 +1,4 @@
+"modele","sigma2_v","AIC","BIC","gamma_moyen","cv_moyen_direct","cv_moyen_eblup"
+"FH-0 (moyenne seule)",1201167568.2305,1532.5,1536.9,0.916,80.9,93.7
+"FH-1 (urban_pct)",136516644.2682,1414,1420.5,0.709,80.9,17.8
+"FH-2 (urban_pct + ndvi + cnn)",18506895.1236,1325.9,1336.7,0.455,80.9,11.9

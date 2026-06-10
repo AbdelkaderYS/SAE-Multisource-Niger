@@ -1,189 +1,296 @@
-# poverty_sae_satellite
+# Poverty Estimation in Niger with Satellite Imagery and Small Area Estimation
 
-Estimating poverty at the regional level in Niger by combining the 2012 DHS survey, satellite variables (NDVI), and a deep learning model (CNN) on Sentinel-2 imagery, within a Small Area Estimation framework (Fay-Herriot model).
+Combine DHS 2012 household surveys with Landsat 7 satellite imagery and a
+ResNet-18 neural network, then apply a Fay-Herriot small area model to estimate
+poverty at the department level (Admin 2, 64 departments) in Niger.
 
----
-
-## Motivation
-
-In Niger, Demographic and Health Surveys (DHS) are conducted by the National Institute of Statistics (INS) every 5 to 10 years. They produce precise estimates at the national level, but precision drops sharply at the regional level and below, because regional samples are too small (between 700 and 1900 households across 8 regions). DHS surveys are typically powered to Admin 1 (region) level, and direct estimates at finer scales suffer from high variance due to data sparsity [Wakefield et al., 2019; Wu et al., 2021]. Increasing sample size is costly and often infeasible [The DHS Program, SAR15].
-
-Satellite imagery (Sentinel-2, MODIS, VIIRS) is free, regularly updated, and covers 100% of the territory. Jean et al. [2016] demonstrated that a CNN trained on publicly available satellite imagery can explain up to 75% of the variation in local-level economic outcomes across five African countries. Yeh et al. [2020] extended this to 20,000 African villages, achieving 70% explained variance in asset wealth. Deep learning can extract signals about wealth, urbanization, or economic activity from these images — signals that regional aggregates lose.
-
-The Fay-Herriot model [Fay & Herriot, 1979] provides the statistical framework to combine a direct estimate (survey) with auxiliary variables (satellite) to "borrow strength" across regions and reduce estimation variance. It is the most widely used area-level small area estimation model [Rao & Molina, 2015] and has been adopted by the U.S. Census Bureau's SAIPE program [Bell et al., 2016] and the World Bank for poverty mapping [Newhouse et al., 2024; Edochie et al., 2024].
-
-This project implements this survey + satellite + deep learning approach on Niger's 2012 DHS.
+**Best model** : FH-2 (urbanization + NDVI + CNN score) achieves a coefficient
+of variation (CV) of 11.9 percent.
 
 ---
 
-## Research questions
+## Key Results
 
-1. Does adding auxiliary satellite variables (mean NDVI, urbanization rate) in a Fay-Herriot model reduce the variance of regional wealth estimates compared to direct survey estimators?
-2. Can a CNN trained on Sentinel-2 patches predict the mean wealth of a DHS cluster from satellite imagery alone?
+| Model | Predictors | AIC | CV (%) | gamma |
+|-------|-----------|------|--------|-------|
+| FH-0 | None (mean only) | 1532.5 | 93.7 | 0.916 |
+| FH-1 | Urbanization rate | 1414.0 | 17.8 | 0.709 |
+| **FH-2** | Urbanization + NDVI + **CNN score** | **1325.9** | **11.9** | **0.455** |
 
----
+- **CNN test R squared**: 0.69 (ResNet-18, 380 train / 96 test clusters)
+- **CNN test RMSE**: 49,904 (wealth index ranges from -70,000 to +465,000)
+- **CV threshold**: 11.9 percent is below 15 percent, meeting the EUROSTAT
+  standard for reliable estimates
+- **Gamma**: 0.455 means the model contributes 54.5 percent of the weight,
+  while the direct survey contributes 45.5 percent. This is a healthy balance
+  for small area estimation.
 
-## Hypotheses
-
-- **H1**: The EBLUP estimator from the Fay-Herriot model has a strictly lower coefficient of variation (CV) than the direct estimator for small regions.
-  - *Basis*: Newhouse et al. [2024] found that SAE with geospatial covariates yields precision gains equivalent to increasing sample size by a factor of 3–5. Edochie et al. [2024] reported 59–68% median CV reduction in West Africa.
-- **H2**: The CNN achieves a strictly positive test R², demonstrating that satellite imagery contains a predictive signal of wealth at the cluster level.
-  - *Basis*: Jean et al. [2016] achieved R² up to 0.75; Yeh et al. [2020] reported 70% variance explained across Africa; Pettersson et al. [2023] reached 72%.
-- **H3**: Combining both approaches (regional FH + aggregated cluster CNN) yields more stable estimates than the survey alone.
-  - *Basis*: The DHS Program [SAR15] demonstrated that geostatistical models yield precision equivalent to a survey three times larger when estimating at sub-national levels.
-
----
-
-## Data
-
-| Source | File | Usage |
-|---|---|---|
-| DHS Niger 2012 Household Recode | `data/raw/NIHR61FL.DTA` | Wealth index (HV271), region (HV024), urban/rural (HV025), weight (HV005) |
-| DHS GPS clusters | `data/raw/NIGE61FL.shp` | Coordinates (LATNUM, LONGNUM) of 476 clusters for Python pipeline |
-| Regional NDVI | simulated | Satellite proxy aggregated by region |
-| Sentinel-2 | to download via GEE | 64x64 pixel patches, 4 bands (B2, B3, B4, B8) |
+The CNN alone explains 69 percent of the wealth variance between clusters
+using only Landsat 7 pixels at 30 meter resolution (RGB bands). Adding these
+predictions to the Fay-Herriot model reduces the CV from 17.8 percent
+(urbanization alone) to 11.9 percent.
 
 ---
 
-## Literature review
+## How the ResNet Works
 
-### Why DHS struggles at sub-national level
+### Why ResNet-18
 
-DHS surveys use a stratified two-stage cluster design. They are powered to produce reliable estimates for large domains (national, Admin 1). At finer spatial scales (Admin 2, communes), sample sizes per area become too small for reliable direct estimation [Wu et al., 2021; Wakefield et al., 2019]. This is well documented in Niger: Seidler et al. [2025] found that Niger's DHS data quality indicators show high sampling uncertainty at sub-national levels. The World Bank's poverty map for Niger [Edochie et al., 2024] explicitly notes that direct estimates at the commune level have median CVs exceeding 30%.
+We use a ResNet-18 (Residual Network with 18 layers) pretrained on ImageNet
+(1.2 million photos, 1000 classes). The key innovation of ResNet is the
+**skip connection** (or residual connection), which lets the gradient flow
+directly through the network during training. This solves the vanishing
+gradient problem that plagued deep networks before 2015.
 
-### Why satellite imagery can help
+ResNet-18 has 11 million parameters. We chose 18 layers (not 34, 50, or 101)
+because:
 
-The link between satellite-observed environmental features and socioeconomic welfare is well established. NDVI, which measures vegetation greenness from red and near-infrared reflectance [Tucker, 1979], is negatively correlated with poverty intensity in West Africa [Sedda et al., 2015]. Engstrom et al. [2022] showed that Landsat-derived NDVI and built-up indices explain 25–50% of variation in economic activity at commune level in Vietnam. Watmough et al. [2019] found that satellite data predicted the poorest households in rural Kenya with 62% accuracy. Nighttime lights have long been used as a proxy for economic activity [Henderson et al., 2012; Chen & Nordhaus, 2011].
+- Our dataset is small: 476 patches of 224 by 224 pixels. A deeper network
+  would overfit.
+- Each department has only 1 to 49 clusters (median 7). The model must
+  generalize from limited data.
+- Satellite imagery has less semantic variety than natural images. The
+  features that distinguish a road from a field are simpler than those that
+  distinguish a dog from a cat.
 
-### Deep learning on satellite imagery for poverty prediction
-
-The landmark paper by Jean, Burke, Xie, Davis, Lobell, & Ermon [2016] introduced a transfer learning approach: a CNN pre-trained on ImageNet is fine-tuned to predict nighttime lights from daytime imagery, then the learned features are used in ridge regression to predict consumption expenditure and asset wealth. They achieved up to 75% R² in five African countries.
-
-Yeh et al. [2020] extended this with an end-to-end CNN trained on Landsat multispectral and nighttime lights imagery across 20,000 DHS clusters in Africa, explaining 70% of village-level wealth variation and 83% at district level. Chi et al. [2022] produced microestimates of wealth for all low- and middle-income countries using similar methods.
-
-More recently, Pettersson et al. [2023] incorporated temporal information via LSTM layers to achieve 72% variance explained across held-out countries. The DeepWealth framework [Tonneau et al., 2024] achieved R² = 0.69 across 24 African countries and demonstrated generalization to Madagascar, Brazil, and Japan. Vision transformers have also been shown to outperform CNNs for wealth prediction from Landsat imagery [World Bank, 2024].
-
-### Small Area Estimation: the Fay-Herriot model
-
-The Fay-Herriot model [Fay & Herriot, 1979] is the foundational area-level SAE model. It treats the direct estimate as a noisy observation of the true value, modeled as:
+### Architecture Details
 
 ```
-direct_estimate_i = x_i' β + v_i + e_i
+Input: 224 x 224 x 3 RGB patch (normalized to [0, 1])
+  |
+  |-- Conv1 (7x7, 64 channels, stride 2)
+  |-- MaxPool (3x3, stride 2)
+  |
+  |-- Layer 1 (2 residual blocks, 64 channels)     -- FROZEN
+  |-- Layer 2 (2 residual blocks, 128 channels)    -- FROZEN
+  |-- Layer 3 (2 residual blocks, 256 channels)    -- FINE-TUNED
+  |-- Layer 4 (2 residual blocks, 512 channels)    -- FINE-TUNED
+  |
+  |-- Average Pool (7x7)
+  |-- Fully Connected (512 -> 256 -> 1)
+  |-- Output: predicted wealth score
 ```
 
-where `v_i ~ N(0, σ²_v)` is area-level random effect and `e_i ~ N(0, ψ_i)` is sampling error with known variance. The EBLUP is a weighted average of the direct estimate and the regression prediction, with weight γ_i = σ²_v / (σ²_v + ψ_i) [Rao & Molina, 2015].
+Each residual block contains two convolutional layers (3x3 kernels) with batch
+normalization and ReLU activation, plus a skip connection that adds the input
+directly to the output.
 
-The World Bank has extensively used FH models for poverty mapping [Newhouse et al., 2024; Edochie et al., 2024]. Battese, Harter, & Fuller [1988] were the first to combine satellite data with SAE. The DHS Program's SAR15 report found that geostatistical models yield precision at Admin 2 equivalent to a survey three times larger.
+### Transfer Learning Strategy
 
-### Combining survey, satellite, and ML
+We freeze layers 1 and 2 (the early layers that detect edges, colors, and
+simple textures) because these features are universal and already well learned
+from ImageNet. We fine-tune layers 3 and 4 (which capture higher-level
+semantic patterns like roads, fields, and settlements) to adapt the network
+to satellite imagery.
 
-The synthesis of these three approaches is the frontier of poverty measurement research. Jean et al. [2016] demonstrated the ML + satellite component; the SAE component is then applied to produce area-level estimates with proper uncertainty quantification. This project applies this integrated framework to Niger, where the need is acute due to infrequent censuses (last census 2012) and limited survey coverage [Edochie et al., 2024].
+The original 1000-class classification head is replaced with a regression head:
+- Linear(512 -> 256) + ReLU + Dropout(0.3)
+- Linear(256 -> 1) for wealth prediction
+
+### Training Setup
+
+| Hyperparameter | Value | Reason |
+|---------------|-------|--------|
+| Optimizer | Adam | Adaptive learning rate, standard for fine-tuning |
+| Learning rate | 0.0005 | 10x lower than typical, to avoid destroying pretrained weights |
+| Weight decay | 0.0001 | Light L2 regularization against overfitting |
+| Batch size | 32 | Fits T4 GPU memory (16 GB) |
+| Max epochs | 100 | Safety limit |
+| Early stopping | Patience 10 | Stops when validation loss plateaus |
+| LR scheduler | ReduceLROnPlateau | Halves LR every 5 epochs without improvement |
+| Test split | 20 percent | 380 train, 96 test clusters |
+
+### Data Augmentation (Training Only)
+
+- Random horizontal flip (50 percent chance) — satellite imagery has no
+  inherent orientation.
+- Random rotation up to 15 degrees — patches may come from different
+  satellite paths.
+- ImageNet normalization (mean and standard deviation per RGB channel).
+
+### Training Progress
+
+The loss dropped steadily from 6.9 billion (epoch 1) to 0.66 billion
+(epoch 100), a 10x reduction. The final checkpoint was saved at epoch 100
+when early stopping triggered (10 epochs without validation improvement).
 
 ---
 
-## Project structure
+## Pipeline Overview
+
+```
+Step 1 (R, local)     Prepare DHS data and compute direct estimates
+                            |
+Step 2 (GEE, cloud)   Export 476 Landsat 7 patches (224x224 RGB)
+                            |
+Step 3 (Kaggle, GPU)  Train ResNet-18, predict wealth for all clusters
+                            |
+Step 4 (R, local)     Fay-Herriot model with CNN predictions
+                            |
+Step 5 (R, local)     Generate maps, tables, and comparison figures
+```
+
+### Step 1: Prepare DHS Data
+
+**Script**: `scripts/preparer_donnees.R`
+
+Read the DHS 2012 household recode (NIHR61FL.DTA, 10,750 households),
+spatially join 476 GPS cluster coordinates to department boundaries
+(Admin 2, OCHA Niger), and compute survey-weighted direct estimates
+for each department.
+
+Produces:
+- `data/processed/direct_estimates_dept.csv` — 64 departments with mean
+  wealth, standard error, CV, and survey variance (psi).
+- `data/processed/clusters_gps.csv` — 476 clusters with coordinates,
+  department ID, and wealth mean.
+
+### Step 2: Export Landsat 7 Patches from Google Earth Engine
+
+**Script**: `scripts/telecharger_patches_gee.js`
+
+Run this script in the GEE Code Editor (code.earthengine.google.com).
+It iterates over all 476 DHS clusters and for each one:
+
+1. Fetches all Landsat 7 scenes (2011-2012) within a 3,360 meter radius.
+2. Filters out scenes with more than 30 percent cloud cover.
+3. Computes a median composite across all remaining scenes (eliminates
+   residual clouds and shadows).
+4. Exports a 224 x 224 pixel RGB GeoTIFF to Google Drive.
+
+The `reproject` call ensures the output is in WGS84 at 30 meter resolution.
+Each patch covers roughly 6.7 by 6.7 kilometers on the ground.
+
+### Step 3: Train ResNet-18 on Kaggle
+
+**Script**: `scripts/entrainer_resnet.py`
+
+Run on Kaggle with a GPU accelerator (T4 or P100). The input is the
+476 patches converted from GeoTIFF to NumPy arrays (224 x 224 x 3,
+float32, normalized to [0, 1]) and the labels from `labels.csv`.
+
+Produces:
+- `resnet18.pt` — trained model weights (44 MB).
+- `cnn_predictions_cluster.csv` — predicted wealth for all 476 clusters.
+- `cnn_metrics.csv` — test R squared and RMSE.
+- `cnn_pred_vs_true.png` — scatter plot of predictions vs actual values.
+
+### Step 4: Fay-Herriot Small Area Model
+
+**Script**: `scripts/fay_herriot.R`
+
+The Fay-Herriot model (Fay and Herriot, 1979) is a standard area-level
+small area estimation method. It combines:
+
+- **Direct estimate** (from DHS survey) — unbiased but high variance for
+  small departments.
+- **Synthetic estimate** (from linear regression on auxiliary variables) —
+  potentially biased but low variance.
+
+The model produces an Empirical Best Linear Unbiased Predictor (EBLUP)
+as a weighted average:
+
+```
+EBLUP_i = gamma_i * direct_i + (1 - gamma_i) * synthetic_i
+```
+
+where gamma_i is the shrinkage factor, close to 1 when the direct estimate
+is reliable (many households), close to 0 when the model dominates.
+
+Three models are compared:
+1. FH-0: intercept only (no auxiliary variables).
+2. FH-1: urbanization rate (percent urban households per department).
+3. FH-2: urbanization rate + NDVI + CNN score.
+
+### Step 5: Outputs and Figures
+
+| File | Description |
+|------|-------------|
+| `outputs/tables/fh_results_comparison.csv` | AIC, CV, gamma for all 3 models |
+| `outputs/tables/fh_results_details.csv` | Per-department: direct, EBLUP, SE, gamma |
+| `outputs/figures/carte_wealth_direct.png` | Map of direct survey estimates by department |
+| `outputs/figures/carte_wealth_eblup.png` | Map of EBLUP estimates (FH-2) |
+| `outputs/figures/comparaison_modeles.png` | Bar chart comparing CV across models |
+| `outputs/figures/shrinkage_vs_taille.png` | Gamma vs number of clusters per department |
+| `outputs/figures/cnn_pred_vs_true.png` | ResNet-18 predictions vs actual wealth |
+
+---
+
+## Project Structure
 
 ```
 poverty_sae_satellite/
-|-- README.md                this file
-|-- NOTEBOOK.md              FH theory + step-by-step guide
-|-- R/
-|   |-- charger_dhs.R        load DHS, prepare variables
-|   |-- estimateurs_directs.R  svyby by region
-|   |-- modele_fay_herriot.R   eblupFH, EBLUP/SE/gamma
-|   |-- visualiser_resultats.R 2 publication figures
-|-- python/
-|   |-- preparer_clusters.py join DHS wealth + GPS
-|   |-- entrainer_cnn.py     CNN 3 convolutions, RMSE/R2
-|   |-- gradcam.py           activation maps
-|-- data/raw/                symlinks to DHS files
-|-- outputs/
-    |-- data/                intermediate RDS
-    |-- tables/              CSV results
-    |-- figures/             PNG figures
+  scripts/               Production scripts
+    preparer_donnees.R     DHS data preparation and direct estimates
+    telecharger_modis.R    NDVI MODIS download
+    telecharger_patches_gee.js  Landsat 7 export (GEE Code Editor)
+    entrainer_resnet.py    ResNet-18 training (Kaggle)
+    fay_herriot.R          Fay-Herriot models and figures
+
+  exploration/           R Markdown exploratory analysis
+    explorer_dhs.Rmd       Clusters, wealth distribution, sample sizes
+    explorer_modis.Rmd     NDVI vs wealth, spatial correlation
+    explorer_patches.Rmd   Landsat patch visualization (requires Python)
+
+  data/
+    raw/                   DHS 2012 data (restricted), Admin 2 boundaries
+    processed/             Direct estimates, cluster GPS, CNN predictions,
+                           NDVI, Landsat patches (476 .tif files)
+
+  outputs/
+    tables/                CSV files with model comparison and details
+    figures/               Maps, scatter plots, and comparison charts
+    models/                Trained ResNet-18 weights (regenerable)
+
+  pipeline_kaggle.ipynb   Kaggle notebook for ResNet training
+  poverty_sae_kaggle.zip  Kaggle dataset archive (patches + scripts)
+  gee_export_patches.ipynb  Colab notebook for batch GEE export
+  gee_clusters.csv        476 cluster coordinates for GEE upload
+  requirements_kaggle.txt  Python dependencies for Kaggle
 ```
 
 ---
 
-## Prerequisites
+## Data Sources
 
-R packages (tested on version 4.3.3):
-```
-install.packages(c("haven", "survey", "sae", "dplyr", "ggplot2", "tidyr"))
-```
-
-Python packages (optional, for deep learning):
-```
-pip install torch torchvision pandas numpy geopandas scikit-learn matplotlib
-```
-
-Google Earth Engine access is required to download Sentinel-2 patches (free account at code.earthengine.google.com).
+| Source | Description | Access |
+|--------|-------------|--------|
+| DHS 2012 (NIHR61FL) | Household survey, 10,750 households, 476 clusters | Restricted (DHS Program, registered users) |
+| GPS clusters (NIGE61FL) | Cluster coordinates with random displacement | Restricted (DHS Program) |
+| Admin 2 Niger | 67 department boundaries | Public (HDX, OCHA, Creative Commons) |
+| Landsat 7 (GEE) | Surface reflectance, 30m resolution, 2011-2012 composite | Public (USGS, via Google Earth Engine) |
+| MODIS MOD13A3 | Monthly NDVI at 1km, 2011-2012 average | Public (NASA, via MODISTools) |
 
 ---
 
-## How to run
+## Notes on Reproducibility
 
-R statistical pipeline (end-to-end, ~30 seconds):
-```r
-setwd("poverty_sae_satellite")
-source("R/charger_dhs.R")
-source("R/estimateurs_directs.R")
-source("R/modele_fay_herriot.R")
-source("R/visualiser_resultats.R")
-```
-
-Python deep learning pipeline (after downloading patches via GEE):
-```bash
-cd poverty_sae_satellite
-python python/preparer_clusters.py
-python python/entrainer_cnn.py
-python python/gradcam.py
-```
-
----
-
-## Expected outputs
-
-| File | Content |
-|---|---|
-| `outputs/tables/direct_estimates.csv` | Mean wealth and direct CV by region |
-| `outputs/tables/fh_results.csv` | EBLUP, SE, gamma by region after Fay-Herriot |
-| `outputs/tables/cnn_metrics.csv` | RMSE and R² of CNN on test set |
-| `outputs/figures/01_direct_vs_eblup.png` | Direct vs EBLUP comparison with 95% CI |
-| `outputs/figures/02_shrinkage.png` | Shrinkage factor gamma by region |
-| `outputs/figures/03_cnn_pred_vs_true.png` | CNN predictions vs ground truth (test) |
-| `outputs/figures/04_gradcam_*.png` | Grad-CAM activation maps |
+- DHS data is confidential and must be requested from the DHS Program
+  (dhsprogram.com). The raw .DTA and .SHP files are gitignored.
+- The 476 Landsat patches are regenerable via GEE (the JavaScript and
+  Colab notebook are provided).
+- The ResNet-18 training on Kaggle takes approximately 1 hour on a T4 GPU
+  and produces regenerable outputs.
+- Three departments have no DHS clusters (desert areas: Bilma, etc.) and
+  are excluded from estimation. This is standard for small area methods.
 
 ---
 
 ## References
 
-- Battese, G.E., Harter, R.M., & Fuller, W.A. (1988). An error-components model for prediction of county crop areas using survey and satellite data. *JASA*, 83(401), 28-36.
-- Bell, W.R., Basel, W.W., & Maples, J.J. (2016). An overview of the U.S. Census Bureau's Small Area Income and Poverty Estimates program. In *Analysis of Poverty Data by Small Area Estimation*. Wiley.
-- Chen, X. & Nordhaus, W.D. (2011). Using luminosity data as a proxy for economic statistics. *PNAS*, 108(21), 8589-8594.
-- Chi, G., Fang, H., Chatterjee, S., & Blumenstock, J.E. (2022). Microestimates of wealth for all low- and middle-income countries. *PNAS*, 119(3), e2113658119.
-- The DHS Program (2013). *Enquete Demographique et de Sante au Niger 2012*. INS Niger.
-- The DHS Program (2019). The DHS Program Modeled Map Surfaces. *Spatial Analysis Reports No. 15*. ICF.
-- Edochie, I., Newhouse, D., et al. (2024). Small Area Estimation of Poverty in Four West African Countries by Integrating Survey and Geospatial Data. *World Bank Policy Research Working Paper*.
-- Engstrom, R., Hersh, J., & Newhouse, D. (2022). Can Medium-Resolution Satellite Imagery Measure Economic Activity at Small Geographies? *World Bank Policy Research Working Paper*.
-- ESA (2015). Sentinel-2 User Handbook. European Space Agency.
-- Fay, R.E. & Herriot, R.A. (1979). Estimates of income for small places. *JASA*, 74(366), 269-277.
-- Henderson, J.V., Storeygard, A., & Weil, D.N. (2012). Measuring economic growth from outer space. *AER*, 102(2), 994-1028.
-- Jean, N., Burke, M., Xie, M., Davis, W.M., Lobell, D.B., & Ermon, S. (2016). Combining satellite imagery and machine learning to predict poverty. *Science*, 353(6301), 790-794.
-- Newhouse, D., et al. (2024). Small Area Estimation of Non-Monetary Poverty with Geospatial Data. *World Bank Policy Research Working Paper*.
-- OPHI & UNDP (2025). *Global MPI 2025*. OPHI Methodological Note 61.
-- Pettersson, M.B., Kakooei, M., Ortheden, J., Johansson, F.D., & Daoud, A. (2023). Time Series of Satellite Imagery Improve Deep Learning Estimates of Neighborhood-Level Poverty in Africa.
-- Rao, J.N.K. & Molina, I. (2015). *Small Area Estimation*. 2nd ed. Wiley.
-- Sedda, L., et al. (2015). Poverty and malaria: NDVI-based spatial analysis in West Africa.
-- Seidler, V., et al. (2025). Subnational variations in the quality of household survey data in sub-Saharan Africa. *Nature Communications*.
-- Tonneau, M., et al. (2024). DeepWealth: A generalizable open-source deep learning framework using satellite images for well-being estimation. *SoftwareX*, 26, 101700.
-- Tucker, C.J. (1979). Red and photographic infrared linear combinations for monitoring vegetation. *Remote Sensing of Environment*, 8(2), 127-150.
-- Wakefield, J., Fuglstad, G.-A., Riebler, A., Godwin, J., Wilson, K., & Clark, S.J. (2019). Estimating under-five mortality in space and time in sub-Saharan Africa. *arXiv:1910.06512*.
-- Watmough, G.R., et al. (2019). Socioecologically informed use of remote sensing data to predict rural household poverty. *PNAS*, 116(4), 1213-1218.
-- Wu, Y., Li, Z.R., Mayala, B.K., et al. (2021). Spatial Modeling for Subnational Administrative Level 2 Small-Area Estimation. *DHS Spatial Analysis Reports No. 21*. ICF.
-- Xie, M., Jean, N., Burke, M., Lobell, D.B., & Ermon, S. (2016). Transfer learning from deep features for remote sensing and poverty mapping. *AAAI*.
-- Yeh, C., Perez, A., Driscoll, A., Azzari, G., Tang, Z., Lobell, D., Ermon, S., & Burke, M. (2020). Using publicly available satellite imagery and deep learning to understand economic well-being in Africa. *Nature Communications*, 11, 2583.
-
----
-
-## Author
+- Fay, R. E., & Herriot, R. A. (1979). Estimates of income for small places:
+  An application of James-Stein procedures to census data. *Journal of the
+  American Statistical Association*, 74(366), 269-277.
+- Jean, N., Burke, M., Xie, M., Davis, W. M., Lobell, D. B., & Ermon, S.
+  (2016). Combining satellite imagery and machine learning to predict poverty.
+  *Science*, 353(6301), 790-794.
+- Yeh, C., Perez, A., Driscoll, A., Azzari, G., Tang, Z., Lobell, D., ...
+  & Ermon, S. (2020). Using publicly available satellite imagery and deep
+  learning to understand economic well-being in Africa. *Nature
+  Communications*, 11, 2583.
+- Rao, J. N. K., & Molina, I. (2015). *Small Area Estimation* (2nd ed.).
+  Wiley.
+- He, K., Zhang, X., Ren, S., & Sun, J. (2016). Deep residual learning for
+  image recognition. *CVPR 2016*.
+- Edochie, I., Newhouse, D., & Cochinard, F. (2024). Small area estimation
+  of poverty under high volatility. *World Bank Policy Research Working Paper*.

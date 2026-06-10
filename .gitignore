@@ -1,27 +1,13 @@
-# Donnees DHS confidentielles (DHS Program, acces restreint)
-data/raw/*.DTA
-data/raw/*.dta
-data/raw/*.shp
-data/raw/*.shx
-data/raw/*.dbf
-data/raw/*.prj
-data/raw/*.sbn
-data/raw/*.sbx
-data/raw/*.cpg
-data/raw/*.shp.xml
-data/raw/*.ZIP
-data/raw/*.zip
+# DHS data: confidential, restricted access
+data/raw/NIHR61FL.DTA
+data/raw/NIGE61FL.*
 data/raw/DHS_README.txt
 data/raw/GPS_Displacement_README.txt
 
-# Donnees traitees volumineuses
-data/processed/*.rds
-
-# Patches Sentinel-2 (volumineux, regenerables via Google Earth Engine)
-python/data/patches/*.npy
-
-# Modele CNN entraine (volumineux, regenerable)
-python/data/cnn_model.pt
+# Regenerable intermediate data
+data/processed/patches_landsat/
+outputs/models/*.pt
+poverty_sae_kaggle.zip
 
 # Python
 __pycache__/

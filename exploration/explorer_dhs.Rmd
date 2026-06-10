@@ -1,0 +1,198 @@
+---
+title: "Exploration des données DHS Niger 2012"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = "center")
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(ggplot2)
+  library(sf)
+  library(haven)
+})
+```
+
+## Charger les données brutes
+
+```{r}
+dhs <- haven::read_dta("data/raw/NIHR61FL.DTA")
+gps <- sf::st_read("data/raw/NIGE61FL.shp", quiet = TRUE)
+```
+
+```{r}
+cat("Nombre de ménages dans le DHS :", nrow(dhs), "\n")
+cat("Nombre de clusters GPS :", nrow(gps), "\n")
+cat("Période de l'enquête :",
+    min(dhs$hv007, na.rm = TRUE), "-",
+    max(dhs$hv007, na.rm = TRUE), "\n")
+```
+
+---
+
+## Distribution de l'indice de richesse
+
+```{r wealth-hist}
+ggplot(dhs, aes(x = hv271)) +
+  geom_histogram(bins = 50, fill = "#1f77b4", alpha = 0.8, color = "white") +
+  labs(
+    title    = "Distribution de l'indice de richesse (HV271)",
+    subtitle = "10 750 ménages enquêtés au Niger en 2012",
+    x = "Indice de richesse (score continu)", y = "Nombre de ménages"
+  ) +
+  theme_bw()
+```
+
+```{r}
+summary(dhs$hv271)
+```
+
+---
+
+## Richesse par région
+
+```{r wealth-region}
+dhs <- dhs %>%
+  mutate(region_label = as_factor(hv024))
+
+ggplot(dhs, aes(x = region_label, y = hv271, fill = region_label)) +
+  geom_boxplot(alpha = 0.7, outlier.size = 0.5) +
+  labs(
+    title    = "Distribution de la richesse par région",
+    subtitle = "DHS Niger 2012",
+    x = "Région", y = "Indice de richesse"
+  ) +
+  theme_bw() +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+---
+
+## Carte des 476 clusters DHS
+
+```{r cluster-map, fig.height=6, fig.width=7}
+ggplot() +
+  geom_sf(data = gps, aes(color = URBAN_RURA), size = 1.5, alpha = 0.7) +
+  scale_color_manual(
+    values = c("R" = "#2ca02c", "U" = "#d62728"),
+    labels = c("R" = "Rural", "U" = "Urbain"),
+    name   = "Milieu"
+  ) +
+  labs(
+    title    = "Les 476 clusters DHS du Niger (2012)",
+    subtitle = "Rouge = urbain, vert = rural",
+    x = "Longitude", y = "Latitude"
+  ) +
+  theme_bw()
+```
+
+### Carte des régions (Admin 1)
+
+```{r admin1-map, fig.height=6, fig.width=7}
+admin1 <- sf::st_read("data/raw/ner_admin1.shp", quiet = TRUE)
+
+ggplot() +
+  geom_sf(data = admin1, fill = "#f0f0f0", color = "#333333", linewidth = 0.6) +
+  geom_sf_text(data = admin1, aes(label = adm1_name),
+               size = 3, fontface = "bold") +
+  geom_sf(data = gps, color = "#1f77b4", size = 0.8, alpha = 0.6) +
+  labs(
+    title = "Régions du Niger (Admin 1) et clusters DHS",
+    x = "Longitude", y = "Latitude"
+  ) +
+  theme_bw()
+```
+
+---
+
+## Carte des départements (Admin 2)
+
+```{r admin2-map, fig.height=6, fig.width=7}
+admin2 <- sf::st_read("data/raw/ner_admin2.shp", quiet = TRUE)
+
+ggplot() +
+  geom_sf(data = admin2, fill = "#f0f0f0", color = "#666666", linewidth = 0.3) +
+  geom_sf(data = admin1, fill = NA, color = "#333333", linewidth = 0.6) +
+  geom_sf(data = gps, color = "#1f77b4", size = 0.8, alpha = 0.6) +
+  labs(
+    title = "Départements du Niger (Admin 2, n = 67) et clusters DHS",
+    x = "Longitude", y = "Latitude"
+  ) +
+  theme_bw()
+```
+
+---
+
+## Effectifs : combien de clusters par département ?
+
+```{r clusters-per-dept}
+cluster_coords <- gps %>%
+  mutate(cluster = as.integer(DHSCLUST)) %>%
+  select(cluster, LATNUM, LONGNUM)
+
+cluster_coords_sf <- st_as_sf(
+  cluster_coords,
+  coords = c("LONGNUM", "LATNUM"),
+  crs = 4326, remove = FALSE
+)
+
+cluster_dept <- st_join(cluster_coords_sf, admin2["adm2_name"]) %>%
+  st_drop_geometry()
+
+# Compter par département
+effectifs <- cluster_dept %>%
+  group_by(adm2_name = adm2_name) %>%
+  summarise(n_clusters = n(), .groups = "drop") %>%
+  arrange(desc(n_clusters))
+
+cat("Résumé : clusters par département\n")
+summary(effectifs$n_clusters)
+cat("\nDépartements avec le plus de clusters :\n")
+print(head(effectifs, 10))
+cat("\nDépartements avec le moins de clusters :\n")
+print(tail(effectifs, 10))
+```
+
+```{r clusters-per-dept-hist}
+ggplot(effectifs, aes(x = n_clusters)) +
+  geom_histogram(bins = 15, fill = "#ff7f0e", alpha = 0.8, color = "white") +
+  labs(
+    title    = "Distribution : nombre de clusters par département",
+    subtitle = paste0("Médiane = ", median(effectifs$n_clusters),
+                      ", min = ", min(effectifs$n_clusters),
+                      ", max = ", max(effectifs$n_clusters)),
+    x = "Nombre de clusters", y = "Nombre de départements"
+  ) +
+  theme_bw()
+```
+
+---
+
+## Richesse moyenne par région (pondérée)
+
+```{r direct-by-region}
+library(survey)
+design <- svydesign(ids = ~hv001, weights = ~hv005, data = dhs, nest = TRUE)
+direct_reg <- svyby(~hv271, ~region_label, design, svymean) %>%
+  rename(region = region_label, wealth = hv271, se = se) %>%
+  mutate(cv = 100 * se / abs(wealth))
+
+ggplot(direct_reg, aes(x = reorder(region, wealth), y = wealth)) +
+  geom_point(size = 3, color = "#1f77b4") +
+  geom_errorbar(aes(ymin = wealth - 1.96 * se, ymax = wealth + 1.96 * se),
+                width = 0.2, color = "#1f77b4", alpha = 0.6) +
+  labs(
+    title    = "Richesse moyenne par région avec IC 95%",
+    subtitle = "Estimateur direct pondéré (svyby)",
+    x = "Région", y = "Indice de richesse moyen"
+  ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+```{r}
+direct_reg %>% arrange(wealth) %>%
+  select(region, wealth, se, cv) %>%
+  mutate(across(where(is.numeric), ~round(., 3))) %>%
+  knitr::kable(caption = "Estimateurs directs par région")
+```

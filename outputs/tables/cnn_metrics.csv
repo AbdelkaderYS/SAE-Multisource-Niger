@@ -1,0 +1,5 @@
+metric,value
+rmse_test,49903.95896118864
+r2_test,0.6916586756706238
+n_train,380.0
+n_test,96.0
