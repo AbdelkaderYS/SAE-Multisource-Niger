@@ -279,9 +279,9 @@ df_qq <- data.frame(
 p_qq <- ggplot(df_qq, aes(x = theoretical, y = sample)) +
   geom_point(color = "#1f77b4", size = 2.5) +
   geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
-  labs(title = "Q-Q plot des residus (modele FH-2)",
-       x = "Quantiles theoriques (normale)",
-       y = "Residus standardises") +
+  labs(title = "Q-Q plot of standardized residuals (FH-2)",
+       x = "Theoretical quantiles (normal)",
+       y = "Standardized residuals") +
   theme_bw()
 ggsave(file.path(OUT_FIG_DIR, "diag_qqplot.png"), p_qq, width = 6, height = 5, dpi = 200)
 cat("  Q-Q plot : output/figures/diag_qqplot.png\n")
@@ -294,9 +294,9 @@ df_resid <- data.frame(
 p_resid <- ggplot(df_resid, aes(x = fitted, y = resid)) +
   geom_point(size = 2.5, alpha = 0.7, color = "#1f77b4") +
   geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
-  labs(title = "Residus vs valeurs ajustees (modele FH-2)",
-       x = "Valeurs ajustees (EBLUP)",
-       y = "Residus") +
+  labs(title = "Residuals vs fitted values (FH-2)",
+       x = "Fitted values (EBLUP)",
+       y = "Residuals") +
   theme_bw()
 ggsave(file.path(OUT_FIG_DIR, "diag_resid_fitted.png"), p_resid, width = 6, height = 5, dpi = 200)
 cat("  Residus vs fitted : output/figures/diag_resid_fitted.png\n")
@@ -311,10 +311,10 @@ admin2_direct <- admin2 %>%
 
 p1 <- ggplot() +
   geom_sf(data = admin2_direct, aes(fill = direct_mean), color = "white", linewidth = 0.2) +
-  scale_fill_gradient2(low = "#d62728", mid = "#f0f0f0", high = "#2ca02c",
-                       midpoint = 0, name = "Richesse") +
-  labs(title = "Richesse moyenne par departement (estimateur direct)",
-       subtitle = "DHS Niger 2012, enquete menages",
+  scale_fill_gradient2(low = "#2166ac", mid = "#f0f0f0", high = "#b2182b",
+                       midpoint = 0, name = "Wealth") +
+  labs(title = "Mean wealth by department (direct estimate)",
+       subtitle = "DHS Niger 2012",
        x = "Longitude", y = "Latitude") +
   theme_bw() +
   theme(legend.position = "bottom")
@@ -331,10 +331,10 @@ admin2_eblup <- admin2 %>%
 
 p2 <- ggplot() +
   geom_sf(data = admin2_eblup, aes(fill = eblup), color = "white", linewidth = 0.2) +
-  scale_fill_gradient2(low = "#d62728", mid = "#f0f0f0", high = "#2ca02c",
-                       midpoint = 0, name = "Richesse") +
-  labs(title = "Richesse moyenne par departement (EBLUP)",
-       subtitle = paste0("Modele : ", best$label),
+  scale_fill_gradient2(low = "#2166ac", mid = "#f0f0f0", high = "#b2182b",
+                       midpoint = 0, name = "Wealth") +
+  labs(title = "Mean wealth by department (EBLUP)",
+       subtitle = paste0("Model: ", best$label),
        x = "Longitude", y = "Latitude") +
   theme_bw() +
   theme(legend.position = "bottom")
@@ -359,11 +359,12 @@ p3 <- ggplot(cv_summary, aes(x = modele, y = cv_moyen, fill = modele)) +
   geom_col(alpha = 0.8, width = 0.6) +
   geom_text(aes(label = sprintf("%.1f%%", cv_moyen)), vjust = -0.5, size = 3.5) +
   scale_fill_brewer(palette = "Set2") +
-  labs(title = "Comparaison du CV moyen entre modeles",
-       subtitle = "CV = SE / |moyenne| * 100",
-       x = "", y = "CV moyen (%)") +
+  labs(title = "Mean CV comparison across models",
+       subtitle = "CV = SE / |mean| * 100",
+       x = "", y = "Mean CV (%)") +
   theme_bw() +
-  theme(legend.position = "none")
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
 ggsave(file.path(OUT_FIG_DIR, "comparaison_modeles.png"), p3,
        width = 8, height = 5, dpi = 200)
 
@@ -379,9 +380,9 @@ p4 <- ggplot(gamma_data, aes(x = n_clusters, y = gamma)) +
   geom_point(size = 2.5, alpha = 0.7, color = "#1f77b4") +
   geom_hline(yintercept = 0.5, linetype = "dashed", color = "#d62728", alpha = 0.5) +
   geom_smooth(method = "loess", se = FALSE, color = "#2ca02c", linewidth = 0.8) +
-  labs(title = "Facteur de shrinkage gamma vs nombre de clusters",
-       subtitle = "gamma proche de 1 = confiance dans l'estimateur direct",
-       x = "Nombre de clusters par departement",
+  labs(title = "Shrinkage factor gamma vs number of clusters",
+       subtitle = "gamma close to 1 = trust in direct estimate",
+       x = "Number of clusters per department",
        y = expression(gamma[i])) +
   theme_bw()
 ggsave(file.path(OUT_FIG_DIR, "shrinkage_vs_taille.png"), p4,
