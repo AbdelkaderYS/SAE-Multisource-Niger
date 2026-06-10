@@ -14,28 +14,31 @@ CNN_PATH <- "data/processed/cnn_predictions_cluster.csv"
 ADM2_PATH <- "data/raw/ner_admin2.shp"
 CLUSTERS_PATH <- "data/processed/clusters_gps.csv"
 OUT_RESULTS <- "outputs/tables/fh_results_comparison.csv"
+OUT_DETAILS <- "outputs/tables/fh_results_details.csv"
 OUT_FIG_DIR <- "outputs/figures"
 
 dir.create(OUT_FIG_DIR, showWarnings = FALSE, recursive = TRUE)
 
-# 1. Charger les données
-cat("=== 1. Chargement des données ===\n")
+# 1. Charger les donnees
+cat("=== 1. Chargement des donnees ===\n")
 direct <- read.csv(DIRECT_PATH, stringsAsFactors = FALSE)
 
+# NDVI
 ndvi <- NULL
 if (file.exists(NDVI_PATH)) {
   ndvi <- read.csv(NDVI_PATH, stringsAsFactors = FALSE)
-  cat("NDVI chargé :", nrow(ndvi), "départements\n")
+  cat("NDVI charge :", nrow(ndvi), "departements\n")
 } else {
-  cat("NDVI non trouvé, utilisation d'une colonne vide\n")
+  cat("NDVI non trouve\n")
 }
 
+# CNN predictions
 cnn_cluster <- NULL
 if (file.exists(CNN_PATH)) {
   cnn_cluster <- read.csv(CNN_PATH, stringsAsFactors = FALSE)
-  cat("Prédictions CNN chargées :", nrow(cnn_cluster), "clusters\n")
+  cat("Predictions CNN chargees :", nrow(cnn_cluster), "clusters\n")
 } else {
-  cat("Prédictions CNN non trouvées (le modèle n'a pas encore tourné)\n")
+  cat("Predictions CNN non trouvees\n")
 }
 
 admin2 <- sf::st_read(ADM2_PATH, quiet = TRUE) %>%
@@ -43,8 +46,8 @@ admin2 <- sf::st_read(ADM2_PATH, quiet = TRUE) %>%
 
 clusters <- read.csv(CLUSTERS_PATH, stringsAsFactors = FALSE)
 
-# 2. Agrégation CNN par département
-cat("\n=== 2. Agrégation CNN par département ===\n")
+# 2. Agregation CNN par departement
+cat("\n=== 2. Agregation CNN par departement ===\n")
 cnn_dept <- NULL
 if (!is.null(cnn_cluster)) {
   cnn_dept <- clusters %>%
@@ -57,19 +60,19 @@ if (!is.null(cnn_cluster)) {
       cnn_n     = n(),
       .groups   = "drop"
     )
-  cat("CNN agrégé :", nrow(cnn_dept), "départements\n")
+  cat("CNN agrege :", nrow(cnn_dept), "departements\n")
 }
 
 # 3. Fusion
 cat("\n=== 3. Fusion des tables ===\n")
-  sae <- direct %>%
+sae <- direct %>%
   left_join(ndvi[, c("dept_id", "ndvi_mean")], by = "dept_id")
 
 if (!is.null(cnn_dept)) {
   sae <- sae %>% left_join(cnn_dept, by = "dept_id")
 }
 
-# Remplacer les NA par la moyenne
+# Remplacer NA par la moyenne
 sae$ndvi_mean[is.na(sae$ndvi_mean)] <- mean(sae$ndvi_mean, na.rm = TRUE)
 if (!is.null(cnn_dept)) {
   sae$cnn_score[is.na(sae$cnn_score)] <- mean(sae$cnn_score, na.rm = TRUE)
@@ -77,10 +80,20 @@ if (!is.null(cnn_dept)) {
   sae$cnn_score <- 0
 }
 
-cat("Table SAE fusionnée :", nrow(sae), "départements\n")
+cat("Table SAE fusionnee :", nrow(sae), "departements\n")
 
-# 4. Modèles FH
-cat("\n=== 4. Ajustement des modèles FH ===\n")
+# Flag departements a 1 seul cluster
+sae$flag_1cluster <- ifelse(sae$n_clusters == 1, 1, 0)
+cat("Departements avec 1 cluster :", sum(sae$flag_1cluster), "/", nrow(sae), "\n")
+
+# Matrice de correlation entre les predicteurs
+cat("\n=== Matrice de correlation (predicteurs) ===\n")
+cor_vars <- sae %>% dplyr::select(urban_pct, ndvi_mean, cnn_score) %>% na.omit()
+cor_matrix <- cor(cor_vars)
+print(round(cor_matrix, 3))
+
+# 4. Modeles FH
+cat("\n=== 4. Ajustement des modeles FH ===\n")
 
 fit_model <- function(formula, label) {
   tryCatch({
@@ -103,12 +116,13 @@ fit_model <- function(formula, label) {
     gamma_vals <- sigma2_v / (sigma2_v + sae$psi)
     gamma_vals <- pmin(pmax(gamma_vals, 0), 1)
 
-    loglik <- as.numeric(fit$fit$goodness["loglike"])
     aic <- as.numeric(fit$fit$goodness["AIC"])
     bic <- as.numeric(fit$fit$goodness["BIC"])
 
-    cat(sprintf("  %s : sigma2_v=%.4f, AIC=%.1f, BIC=%.1f, gamma_moyen=%.3f\n",
-                label, sigma2_v, aic, bic, mean(gamma_vals)))
+    cv_eblup <- 100 * se_eblup / abs(eblup)
+
+    cat(sprintf("  %s : sigma2_v=%.4f, AIC=%.1f, BIC=%.1f, gamma_moyen=%.3f, CV=%.1f%%\n",
+                label, sigma2_v, aic, bic, mean(gamma_vals), mean(cv_eblup, na.rm = TRUE)))
 
     list(
       label = label,
@@ -118,36 +132,100 @@ fit_model <- function(formula, label) {
       gamma_mean = mean(gamma_vals),
       eblup = eblup,
       se_eblup = se_eblup,
-      gamma = gamma_vals
+      gamma = gamma_vals,
+      cv_eblup = cv_eblup,
+      resid = direct$direct_mean - eblup
     )
   }, error = function(e) {
-    cat(sprintf("  %s : ÉCHEC (%s)\n", label, e$message))
+    cat(sprintf("  %s : ECHEC (%s)\n", label, e$message))
     NULL
   })
 }
 
-models <- list(
-  fit_model(direct_mean ~ 1, "FH-0 (moyenne seule)"),
-  fit_model(direct_mean ~ urban_pct, "FH-1 (urban_pct)")
-)
+# Definir tous les modeles
+models <- list()
 
-# FH-2 : selon disponibilité des données
+models[[1]] <- fit_model(direct_mean ~ 1, "FH-0 (moyenne seule)")
+models[[2]] <- fit_model(direct_mean ~ urban_pct, "FH-1 (urban_pct)")
+models[[3]] <- fit_model(direct_mean ~ urban_pct + ndvi_mean, "FH-1b (urban_pct + ndvi)")
+
 if (!is.null(cnn_dept) && any(sae$cnn_score != 0)) {
-  models[[3]] <- fit_model(
+  models[[4]] <- fit_model(direct_mean ~ urban_pct + cnn_score, "FH-1c (urban_pct + cnn)")
+  models[[5]] <- fit_model(
     direct_mean ~ urban_pct + ndvi_mean + cnn_score,
     "FH-2 (urban_pct + ndvi + cnn)"
   )
 } else {
-  models[[3]] <- fit_model(
-    direct_mean ~ urban_pct + ndvi_mean,
-    "FH-2 (urban_pct + ndvi)"
-  )
+  models[[4]] <- fit_model(direct_mean ~ urban_pct + ndvi_mean, "FH-2 (urban_pct + ndvi)")
 }
 
 models <- Filter(Negate(is.null), models)
 
-# 5. Tableau comparatif
-cat("\n=== 5. Résultats ===\n")
+# 5. Bootstrap IC pour le CV du meilleur modele
+cat("\n=== 5. Bootstrap IC pour le CV ===\n")
+best_idx <- length(models)
+n_boot <- 1000
+boot_cv <- numeric(n_boot)
+
+for (b in 1:n_boot) {
+  idx <- sample(nrow(sae), replace = TRUE)
+  boot_data <- sae[idx, ]
+  tryCatch({
+    fit <- sae::eblupFH(
+      formula = direct_mean ~ urban_pct + ndvi_mean + cnn_score,
+      vardir = psi,
+      data = boot_data,
+      method = "REML"
+    )
+    mse <- sae::mseFH(
+      formula = direct_mean ~ urban_pct + ndvi_mean + cnn_score,
+      vardir = psi,
+      data = boot_data,
+      method = "REML"
+    )
+    eblup <- as.numeric(fit$eblup)
+    se <- sqrt(as.numeric(mse$mse))
+    cv <- 100 * se / abs(eblup)
+    boot_cv[b] <- mean(cv, na.rm = TRUE)
+  }, error = function(e) {
+    boot_cv[b] <- NA
+  })
+}
+
+boot_cv <- na.omit(boot_cv)
+cv_ci <- quantile(boot_cv, probs = c(0.025, 0.975), na.rm = TRUE)
+cat(sprintf("Bootstrap (%d iterations) :\n", length(boot_cv)))
+cat(sprintf("  CV moyen = %.1f%%\n", mean(boot_cv)))
+cat(sprintf("  IC 95%%  = [%.1f%%, %.1f%%]\n", cv_ci[1], cv_ci[2]))
+
+# CV moyen sans les departs a 1 cluster
+sae_no1 <- sae %>% filter(flag_1cluster == 0)
+if (nrow(sae_no1) > 0) {
+  tryCatch({
+    fit_no1 <- sae::eblupFH(
+      direct_mean ~ urban_pct + ndvi_mean + cnn_score,
+      vardir = psi,
+      data = sae_no1,
+      method = "REML"
+    )
+    mse_no1 <- sae::mseFH(
+      direct_mean ~ urban_pct + ndvi_mean + cnn_score,
+      vardir = psi,
+      data = sae_no1,
+      method = "REML"
+    )
+    eblup_no1 <- as.numeric(fit_no1$eblup)
+    se_no1 <- sqrt(as.numeric(mse_no1$mse))
+    cv_no1 <- mean(100 * se_no1 / abs(eblup_no1), na.rm = TRUE)
+    cat(sprintf("\nCV sans %d departements 1-cluster = %.1f%%\n",
+                sum(sae$flag_1cluster), cv_no1))
+  }, error = function(e) {
+    cat("Impossible de calculer le CV sans les 1-cluster\n")
+  })
+}
+
+# 6. Tableau comparatif
+cat("\n=== 6. Tableau comparatif ===\n")
 comparison <- do.call(rbind, lapply(models, function(m) {
   data.frame(
     modele = m$label,
@@ -155,37 +233,78 @@ comparison <- do.call(rbind, lapply(models, function(m) {
     AIC = round(m$aic, 1),
     BIC = round(m$bic, 1),
     gamma_moyen = round(m$gamma_mean, 3),
-    cv_moyen_direct = round(mean(sae$cv_direct, na.rm = TRUE), 1),
-    cv_moyen_eblup = round(mean(100 * m$se_eblup / abs(m$eblup), na.rm = TRUE), 1),
+    cv_moyen_eblup = round(mean(m$cv_eblup, na.rm = TRUE), 1),
     stringsAsFactors = FALSE
   )
 }))
+# Ajouter l'IC du bootstrap au meilleur modele
+comparison$cv_ic_bas <- NA
+comparison$cv_ic_haut <- NA
+comparison$cv_ic_bas[nrow(comparison)] <- round(cv_ci[1], 1)
+comparison$cv_ic_haut[nrow(comparison)] <- round(cv_ci[2], 1)
+
 print(comparison)
 write.csv(comparison, OUT_RESULTS, row.names = FALSE)
 
-# 6. Tableau détaillé du meilleur modèle
-cat("\n=== 6. Meilleur modèle : détails par département ===\n")
-best <- models[[length(models)]]
-  results_dept <- sae %>%
+# 7. Tableau detaille du meilleur modele
+cat("\n=== 7. Meilleur modele : details par departement ===\n")
+best <- models[[best_idx]]
+results_dept <- sae %>%
   mutate(
     eblup    = best$eblup,
     se_eblup = best$se_eblup,
     gamma    = best$gamma,
     cv_eblup = 100 * se_eblup / abs(eblup),
-    cv_gain  = cv_direct - cv_eblup
+    cv_gain  = cv_direct - cv_eblup,
+    resid    = best$resid
   ) %>%
-  dplyr::select(dept_id, dept_name, n_clusters, urban_pct,
+  dplyr::select(dept_id, dept_name, n_clusters, flag_1cluster,
+                urban_pct, ndvi_mean,
                 direct_mean, eblup, se_direct, se_eblup,
-                cv_direct, cv_eblup, gamma, cv_gain, ndvi_mean) %>%
+                cv_direct, cv_eblup, gamma, cv_gain, resid) %>%
   arrange(desc(cv_gain))
 
 print(head(results_dept, 15))
-write.csv(results_dept, "outputs/tables/fh_results_details.csv", row.names = FALSE)
+write.csv(results_dept, OUT_DETAILS, row.names = FALSE)
 
-# 7. Figures
-cat("\n=== 7. Génération des figures ===\n")
+# 8. Diagnostics
+cat("\n=== 8. Diagnostics ===\n")
 
-# Figure 1 : Carte richesse directe
+# QQ-plot des residus standardises
+resid_std <- scale(best$resid)
+df_qq <- data.frame(
+  theoretical = qnorm(ppoints(length(resid_std))),
+  sample = sort(resid_std)
+)
+p_qq <- ggplot(df_qq, aes(x = theoretical, y = sample)) +
+  geom_point(color = "#1f77b4", size = 2.5) +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(title = "Q-Q plot des residus (modele FH-2)",
+       x = "Quantiles theoriques (normale)",
+       y = "Residus standardises") +
+  theme_bw()
+ggsave(file.path(OUT_FIG_DIR, "diag_qqplot.png"), p_qq, width = 6, height = 5, dpi = 200)
+cat("  Q-Q plot : output/figures/diag_qqplot.png\n")
+
+# Residus vs valeurs ajustees
+df_resid <- data.frame(
+  fitted = best$eblup,
+  resid = best$resid
+)
+p_resid <- ggplot(df_resid, aes(x = fitted, y = resid)) +
+  geom_point(size = 2.5, alpha = 0.7, color = "#1f77b4") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Residus vs valeurs ajustees (modele FH-2)",
+       x = "Valeurs ajustees (EBLUP)",
+       y = "Residus") +
+  theme_bw()
+ggsave(file.path(OUT_FIG_DIR, "diag_resid_fitted.png"), p_resid, width = 6, height = 5, dpi = 200)
+cat("  Residus vs fitted : output/figures/diag_resid_fitted.png\n")
+
+# 9. Figures existantes (cartes, comparaison)
+cat("\n=== 9. Figures ===\n")
+
+# Carte richesse directe
 cat("  Carte richesse directe...\n")
 admin2_direct <- admin2 %>%
   left_join(sae, by = "dept_id")
@@ -194,15 +313,15 @@ p1 <- ggplot() +
   geom_sf(data = admin2_direct, aes(fill = direct_mean), color = "white", linewidth = 0.2) +
   scale_fill_gradient2(low = "#d62728", mid = "#f0f0f0", high = "#2ca02c",
                        midpoint = 0, name = "Richesse") +
-  labs(title = "Richesse moyenne par département (estimateur direct)",
-       subtitle = "DHS Niger 2012, enquête ménages",
+  labs(title = "Richesse moyenne par departement (estimateur direct)",
+       subtitle = "DHS Niger 2012, enquete menages",
        x = "Longitude", y = "Latitude") +
   theme_bw() +
   theme(legend.position = "bottom")
 ggsave(file.path(OUT_FIG_DIR, "carte_wealth_direct.png"), p1,
        width = 8, height = 7, dpi = 200)
 
-# Figure 2 : Carte EBLUP
+# Carte EBLUP
 cat("  Carte richesse EBLUP...\n")
 admin2_eblup <- admin2 %>%
   left_join(
@@ -214,20 +333,20 @@ p2 <- ggplot() +
   geom_sf(data = admin2_eblup, aes(fill = eblup), color = "white", linewidth = 0.2) +
   scale_fill_gradient2(low = "#d62728", mid = "#f0f0f0", high = "#2ca02c",
                        midpoint = 0, name = "Richesse") +
-  labs(title = "Richesse moyenne par département (EBLUP)",
-       subtitle = paste0("Modèle : ", best$label),
+  labs(title = "Richesse moyenne par departement (EBLUP)",
+       subtitle = paste0("Modele : ", best$label),
        x = "Longitude", y = "Latitude") +
   theme_bw() +
   theme(legend.position = "bottom")
 ggsave(file.path(OUT_FIG_DIR, "carte_wealth_eblup.png"), p2,
        width = 8, height = 7, dpi = 200)
 
-# Figure 3 : Comparaison des CV
+# Comparaison des CV entre modeles
 cat("  Comparaison des CV...\n")
 cv_data <- do.call(rbind, lapply(models, function(m) {
   data.frame(
     modele = m$label,
-    cv = 100 * m$se_eblup / abs(m$eblup),
+    cv = m$cv_eblup,
     dept_id = sae$dept_id,
     stringsAsFactors = FALSE
   )
@@ -238,17 +357,17 @@ cv_summary <- cv_data %>%
 
 p3 <- ggplot(cv_summary, aes(x = modele, y = cv_moyen, fill = modele)) +
   geom_col(alpha = 0.8, width = 0.6) +
-  geom_text(aes(label = sprintf("%.1f%%", cv_moyen)), vjust = -0.5, size = 4) +
+  geom_text(aes(label = sprintf("%.1f%%", cv_moyen)), vjust = -0.5, size = 3.5) +
   scale_fill_brewer(palette = "Set2") +
-  labs(title = "Comparaison du CV moyen entre modèles",
-       subtitle = "CV = SE / |moyenne| × 100",
+  labs(title = "Comparaison du CV moyen entre modeles",
+       subtitle = "CV = SE / |moyenne| * 100",
        x = "", y = "CV moyen (%)") +
   theme_bw() +
   theme(legend.position = "none")
 ggsave(file.path(OUT_FIG_DIR, "comparaison_modeles.png"), p3,
-       width = 7, height = 5, dpi = 200)
+       width = 8, height = 5, dpi = 200)
 
-# Figure 4 : gamma vs nombre de clusters
+# Gamma vs nombre de clusters
 cat("  Gamma vs taille...\n")
 gamma_data <- data.frame(
   n_clusters = sae$n_clusters,
@@ -262,13 +381,13 @@ p4 <- ggplot(gamma_data, aes(x = n_clusters, y = gamma)) +
   geom_smooth(method = "loess", se = FALSE, color = "#2ca02c", linewidth = 0.8) +
   labs(title = "Facteur de shrinkage gamma vs nombre de clusters",
        subtitle = "gamma proche de 1 = confiance dans l'estimateur direct",
-       x = "Nombre de clusters par département",
+       x = "Nombre de clusters par departement",
        y = expression(gamma[i])) +
   theme_bw()
 ggsave(file.path(OUT_FIG_DIR, "shrinkage_vs_taille.png"), p4,
        width = 7, height = 5, dpi = 200)
 
-cat("\nTerminé.\n")
-cat("Résultats :", OUT_RESULTS, "\n")
-cat("Détails   : outputs/tables/fh_results_details.csv\n")
-cat("Figures   :", OUT_FIG_DIR, "/*.png (4 figures)\n")
+cat("\nTermine.\n")
+cat("Resultats :", OUT_RESULTS, "\n")
+cat("Details   :", OUT_DETAILS, "\n")
+cat("Figures   :", OUT_FIG_DIR, "/*.png\n")

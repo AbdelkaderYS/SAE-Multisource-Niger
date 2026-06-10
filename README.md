@@ -1,230 +1,86 @@
-# Poverty Estimation in Niger with Satellite Imagery and Small Area Estimation
+# Poverty in Niger from Space 🛰️
 
+Can we estimate poverty in every department of Niger using only **free satellite imagery** and **a simple neural network**?
 
-> ### *Predict poverty across Niger's 64 departments from free satellite imagery, without costly household surveys!*
-
-> ### *Cibler les zones de pauvreté au Niger avec l'IA sur des images satellite, une alternative rapide et gratuite aux enquêtes ménages!*
-
-
-
-Combine DHS 2012 household surveys with Landsat 7 satellite imagery and a
-ResNet-18 neural network, then apply a Fay-Herriot small area model to estimate
-poverty at the department level (Admin 2, 64 departments) in Niger.
-
-**Best model** : FH-2 (urbanization + NDVI + CNN score) achieves a coefficient
-of variation (CV) of 11.9 percent.
+Short answer: yes. A ResNet-18 trained on Landsat 7 patches, combined with a Fay-Herriot small area model, gives a CV of **11.9%** (the EUROSTAT reliability threshold is 15%).
 
 ---
 
-## Key Results
+## TL;DR
 
-| Model          | Predictors                               | AIC              | CV (%)         | gamma           |
-| -------------- | ---------------------------------------- | ---------------- | -------------- | --------------- |
-| FH-0           | None (mean only)                         | 1532.5           | 93.7           | 0.916           |
-| FH-1           | Urbanization rate                        | 1414.0           | 17.8           | 0.709           |
-| **FH-2** | Urbanization + NDVI +**CNN score** | **1325.9** | **11.9** | **0.455** |
-
-- **CNN test R squared**: 0.69 (ResNet-18, 380 train / 96 test clusters)
-- **CNN test RMSE**: 49,904 (wealth index ranges from -70,000 to +465,000)
-- **CV threshold**: 11.9 percent is below 15 percent, meeting the EUROSTAT
-  standard for reliable estimates
-- **Gamma**: 0.455 means the model contributes 54.5 percent of the weight,
-  while the direct survey contributes 45.5 percent. This is a healthy balance
-  for small area estimation.
-
-The CNN alone explains 69 percent of the wealth variance between clusters
-using only Landsat 7 pixels at 30 meter resolution (RGB bands). Adding these
-predictions to the Fay-Herriot model reduces the CV from 17.8 percent
-(urbanization alone) to 11.9 percent.
+| What | Result |
+|---|---|
+| Best model | FH-2 (urbanization + NDVI + CNN) |
+| CV | **11.9%** [CI 95%: XX% to YY%] |
+| CNN R² | 0.69 ± XX (spatial 5-fold CV) |
+| Data | DHS 2012, 10,750 households, 476 clusters |
+| Satellite | Landsat 7, 30m resolution, 224x224 patches |
 
 ---
 
-## How the ResNet Works
+## Methodology (5 steps)
 
-### Why ResNet-18
-
-We use a ResNet-18 (Residual Network with 18 layers) pretrained on ImageNet
-(1.2 million photos, 1000 classes). The key innovation of ResNet is the
-**skip connection** (or residual connection), which lets the gradient flow
-directly through the network during training. This solves the vanishing
-gradient problem that plagued deep networks before 2015.
-
-ResNet-18 has 11 million parameters. We chose 18 layers (not 34, 50, or 101)
-because:
-
-- Our dataset is small: 476 patches of 224 by 224 pixels. A deeper network
-  would overfit.
-- Each department has only 1 to 49 clusters (median 7). The model must
-  generalize from limited data.
-- Satellite imagery has less semantic variety than natural images. The
-  features that distinguish a road from a field are simpler than those that
-  distinguish a dog from a cat.
-
-### Architecture Details
-
-```
-Input: 224 x 224 x 3 RGB patch (normalized to [0, 1])
-  |
-  |-- Conv1 (7x7, 64 channels, stride 2)
-  |-- MaxPool (3x3, stride 2)
-  |
-  |-- Layer 1 (2 residual blocks, 64 channels)     -- FROZEN
-  |-- Layer 2 (2 residual blocks, 128 channels)    -- FROZEN
-  |-- Layer 3 (2 residual blocks, 256 channels)    -- FINE-TUNED
-  |-- Layer 4 (2 residual blocks, 512 channels)    -- FINE-TUNED
-  |
-  |-- Average Pool (7x7)
-  |-- Fully Connected (512 -> 256 -> 1)
-  |-- Output: predicted wealth score
-```
-
-Each residual block contains two convolutional layers (3x3 kernels) with batch
-normalization and ReLU activation, plus a skip connection that adds the input
-directly to the output.
-
-### Transfer Learning Strategy
-
-We freeze layers 1 and 2 (the early layers that detect edges, colors, and
-simple textures) because these features are universal and already well learned
-from ImageNet. We fine-tune layers 3 and 4 (which capture higher-level
-semantic patterns like roads, fields, and settlements) to adapt the network
-to satellite imagery.
-
-The original 1000-class classification head is replaced with a regression head:
-
-- Linear(512 -> 256) + ReLU + Dropout(0.3)
-- Linear(256 -> 1) for wealth prediction
-
-### Training Setup
-
-| Hyperparameter | Value             | Reason                                                         |
-| -------------- | ----------------- | -------------------------------------------------------------- |
-| Optimizer      | Adam              | Adaptive learning rate, standard for fine-tuning               |
-| Learning rate  | 0.0005            | 10x lower than typical, to avoid destroying pretrained weights |
-| Weight decay   | 0.0001            | Light L2 regularization against overfitting                    |
-| Batch size     | 32                | Fits T4 GPU memory (16 GB)                                     |
-| Max epochs     | 100               | Safety limit                                                   |
-| Early stopping | Patience 10       | Stops when validation loss plateaus                            |
-| LR scheduler   | ReduceLROnPlateau | Halves LR every 5 epochs without improvement                   |
-| Test split     | 20 percent        | 380 train, 96 test clusters                                    |
-
-### Data Augmentation (Training Only)
-
-- Random horizontal flip (50 percent chance): satellite imagery has no
-  inherent orientation.
-- Random rotation up to 15 degrees: patches may come from different
-  satellite paths.
-- ImageNet normalization (mean and standard deviation per RGB channel).
-
-### Training Progress
-
-The loss dropped steadily from 6.9 billion (epoch 1) to 0.66 billion
-(epoch 100), a 10x reduction. The final checkpoint was saved at epoch 100
-when early stopping triggered (10 epochs without validation improvement).
-
----
-
-## Pipeline Overview
-
-```
-Step 1 (R, local)     Prepare DHS data and compute direct estimates
-                            |
-Step 2 (GEE, cloud)   Export 476 Landsat 7 patches (224x224 RGB)
-                            |
-Step 3 (Kaggle, GPU)  Train ResNet-18, predict wealth for all clusters
-                            |
-Step 4 (R, local)     Fay-Herriot model with CNN predictions
-                            |
-Step 5 (R, local)     Generate maps, tables, and comparison figures
-```
-
-### Step 1: Prepare DHS Data
-
+### Step 1. DHS data to direct estimates
 **Script**: `scripts/preparer_donnees.R`
 
-Read the DHS 2012 household recode (NIHR61FL.DTA, 10,750 households),
-spatially join 476 GPS cluster coordinates to department boundaries
-(Admin 2, OCHA Niger), and compute survey-weighted direct estimates
-for each department.
+The DHS 2012 household survey (10,750 households across 476 GPS clusters) is spatially joined to Niger's 64 department boundaries (Admin 2). A survey-weighted mean of household wealth is computed per department, giving a **direct estimate** with its standard error and coefficient of variation (CV).
 
-Produces:
+**Output**: `data/processed/direct_estimates_dept.csv` (64 departments with mean wealth, SE, CV, survey variance)
 
-- `data/processed/direct_estimates_dept.csv`: 64 departments with mean
-  wealth, standard error, CV, and survey variance (psi).
-- `data/processed/clusters_gps.csv`: 476 clusters with coordinates,
-  department ID, and wealth mean.
+### Step 2. Landsat 7 patches from Google Earth Engine
+**Script**: `scripts/telecharger_patches_gee.js` (GEE) or `scripts/telecharger_landsat.py` (STAC/rasterio)
 
-### Step 2: Export Landsat 7 Patches from Google Earth Engine
+For each of the 476 DHS clusters, we fetch all Landsat 7 scenes (2011-2012) within a 3,360m radius. Only scenes with less than 30% cloud cover are kept. A **median composite** across all retained scenes eliminates residual clouds and shadows. Each patch is exported as 224x224 pixels at 30m resolution, covering roughly 6.7x6.7 km on the ground.
 
-**Script**: `scripts/telecharger_patches_gee.js`
+Only the 3 RGB bands are used (not NIR, SWIR, or thermal). The ResNet-18 is pretrained on ImageNet (3-channel RGB), so extra bands would break transfer learning. The NIR information is captured separately via MODIS NDVI in the FH model.
 
-Run this script in the GEE Code Editor (code.earthengine.google.com).
-It iterates over all 476 DHS clusters and for each one:
+**Output**: 476 GeoTIFF files in `data/processed/patches_landsat/`
 
-1. Fetches all Landsat 7 scenes (2011-2012) within a 3,360 meter radius.
-2. Filters out scenes with more than 30 percent cloud cover.
-3. Computes a median composite across all remaining scenes (eliminates
-   residual clouds and shadows).
-4. Exports a 224 x 224 pixel RGB GeoTIFF to Google Drive.
+### Step 3. ResNet-18 training with spatial cross-validation
+**Script**: `scripts/entrainer_resnet.py` (Kaggle GPU)
 
-The `reproject` call ensures the output is in WGS84 at 30 meter resolution.
-Each patch covers roughly 6.7 by 6.7 kilometers on the ground.
+We use a **ResNet-18 pretrained on ImageNet** (11M parameters). Early layers (edge/texture detectors) are frozen. Layers 3 and 4 (semantic patterns like roads, fields, settlements) are fine-tuned. The classification head is replaced with a regression head: `Linear(512→256) → ReLU → Dropout(0.3) → Linear(256→1)`.
 
-### Step 3: Train ResNet-18 on Kaggle
+Why ResNet-18 and not deeper? Our dataset is small (476 patches). A deeper network would overfit. Satellite imagery also has less semantic variety than natural images.
 
-**Script**: `scripts/entrainer_resnet.py`
+**Validation** instead of a single 80/20 split, we use **Group 5-fold cross-validation by department**. Each fold holds out entire departments (about 13 per fold) and tests whether the model generalizes to unseen spatial locations. Learning curves (train/val MSE per epoch) and a boxplot of R² across folds are saved to detect overfitting.
 
-Run on Kaggle with a GPU accelerator (T4 or P100). The input is the
-476 patches converted from GeoTIFF to NumPy arrays (224 x 224 x 3,
-float32, normalized to [0, 1]) and the labels from `labels.csv`.
+Hyperparameters: Adam (lr=5e-4, weight decay=1e-4), batch size 32, max 100 epochs with early stopping (patience 10). Augmentation: random flip (p=0.5), random rotation (±15°).
 
-Produces:
+**Outputs**: trained weights (`resnet18.pt`), CV metrics (mean ± std), out-of-fold predictions, learning curves and CV boxplot figures.
 
-- `resnet18.pt`: trained model weights (44 MB).
-- `cnn_predictions_cluster.csv`: predicted wealth for all 476 clusters.
-- `cnn_metrics.csv`: test R squared and RMSE.
-- `cnn_pred_vs_true.png` : scatter plot of predictions vs actual values.
-
-### Step 4: Fay-Herriot Small Area Model
-
+### Step 4. Fay-Herriot small area model
 **Script**: `scripts/fay_herriot.R`
 
-The Fay-Herriot model (Fay and Herriot, 1979) is a standard area-level
-small area estimation method. It combines:
+The Fay-Herriot model (1979) combines the **direct estimate** from the survey (unbiased but high variance for small departments) with a **synthetic estimate** from regression on auxiliary variables (potentially biased but low variance). The result is an EBLUP:
 
-- **Direct estimate** (from DHS survey), unbiased but high variance for
-  small departments.
-- **Synthetic estimate** (from linear regression on auxiliary variables):
-  potentially biased but low variance.
+`EBLUP_i = gamma_i * direct_i + (1 - gamma_i) * synthetic_i`
 
-The model produces an Empirical Best Linear Unbiased Predictor (EBLUP)
-as a weighted average:
+where `gamma_i` is the shrinkage factor. It is close to 1 when the direct estimate is reliable (many households) and close to 0 when the model dominates.
 
-```
-EBLUP_i = gamma_i * direct_i + (1 - gamma_i) * synthetic_i
-```
+Five model specifications are compared:
 
-where gamma_i is the shrinkage factor, close to 1 when the direct estimate
-is reliable (many households), close to 0 when the model dominates.
+| Model | Formula | What it tests |
+|---|---|---|
+| FH-0 | `~ 1` | Baseline (mean only) |
+| FH-1 | `~ urban_pct` | Does urbanization alone help? |
+| FH-1b | `~ urban_pct + ndvi_mean` | Does NDVI add anything? |
+| FH-1c | `~ urban_pct + cnn_score` | Does the CNN add anything? |
+| FH-2 | `~ urban_pct + ndvi_mean + cnn_score` | Full model |
 
-Four models are compared:
+A **bootstrap** (1000 resamples) provides a 95% confidence interval around the FH-2 CV.
 
-1. FH-0: intercept only (no auxiliary variables).
-2. FH-1: urbanization rate (percent urban households per department).
-3. FH-2: urbanization rate + NDVI + CNN score.
-4. FH-3: urbanization rate + NDVI + CNN score + nightlights *(planned)*.
+**Output**: `fh_results_comparison.csv` (all models), `fh_results_details.csv` (per department)
 
-### Step 5: Outputs and Figures
+### Step 5. Diagnostics and maps
 
-| File                                         | Description                                  |
-| -------------------------------------------- | -------------------------------------------- |
-| `outputs/tables/fh_results_comparison.csv` | AIC, CV, gamma for all fitted models         |
-| `outputs/tables/fh_results_details.csv`    | Per-department: direct, EBLUP, SE, gamma     |
-| `outputs/figures/carte_wealth_direct.png`  | Map of direct survey estimates by department |
-| `outputs/figures/carte_wealth_eblup.png`   | Map of EBLUP estimates (FH-2)                |
-| `outputs/figures/comparaison_modeles.png`  | Bar chart comparing CV across models         |
-| `outputs/figures/shrinkage_vs_taille.png`  | Gamma vs number of clusters per department   |
-| `outputs/figures/cnn_pred_vs_true.png`     | ResNet-18 predictions vs actual wealth       |
+The FH-2 model is validated with:
+- **Q-Q plot** of standardized residuals (normality check)
+- **Residuals vs fitted values** (heteroscedasticity check)
+- **Predictor correlation matrix** (printed to console)
+- **1-cluster flag**: 10 departments have only 1 DHS cluster; their gamma is near 0, meaning the synthetic model dominates. They are flagged in the detailed results.
+
+Four maps and figures are generated: poverty map (direct), poverty map (EBLUP), CV comparison across models, and gamma vs cluster size.
 
 ---
 
@@ -232,76 +88,106 @@ Four models are compared:
 
 ```
 poverty_sae_satellite/
-  scripts/               Production scripts
-    preparer_donnees.R     DHS data preparation and direct estimates
-    telecharger_modis.R    NDVI MODIS download
-    telecharger_patches_gee.js  Landsat 7 export (GEE Code Editor)
-    entrainer_resnet.py    ResNet-18 training (Kaggle)
-    fay_herriot.R          Fay-Herriot models and figures
-
-  exploration/           R Markdown exploratory analysis
-    explorer_dhs.Rmd       Clusters, wealth distribution, sample sizes
-    explorer_modis.Rmd     NDVI vs wealth, spatial correlation
-    explorer_patches.Rmd   Landsat patch visualization (requires Python)
+  scripts/
+    entrainer_resnet.py      ResNet-18 training + spatial CV
+    fay_herriot.R            FH models + diagnostics + figures
+    preparer_donnees.R       DHS data to direct estimates
+    telecharger_landsat.py   Landsat 7 download via STAC
+    telecharger_modis.R      NDVI MODIS download
+    telecharger_patches_gee.js  GEE export (alternative)
 
   data/
-    raw/                   DHS 2012 data (restricted), Admin 2 boundaries
-    processed/             Direct estimates, cluster GPS, CNN predictions,
-                           NDVI, Landsat patches (476 .tif files)
+    raw/                     DHS data (restricted), admin boundaries
+    processed/               estimates, labels, patches, predictions
 
   outputs/
-    tables/                CSV files with model comparison and details
-    figures/               Maps, scatter plots, and comparison charts
-    models/                Trained ResNet-18 weights (regenerable)
-
-  pipeline_kaggle.ipynb   Kaggle notebook for ResNet training
-  poverty_sae_kaggle.zip  Kaggle dataset archive (patches + scripts)
-  gee_export_patches.ipynb  Colab notebook for batch GEE export
-  gee_clusters.csv        476 cluster coordinates for GEE upload
-  requirements_kaggle.txt  Python dependencies for Kaggle
+    tables/                  CSV metrics and model comparisons
+    figures/                 maps, diagnostics, learning curves
+    models/                  trained ResNet-18 weights
 ```
+
+---
+
+## Limitations
+
+### 1. Data from 2012 (temporal gap)
+
+The DHS survey, Landsat 7 scenes, and NDVI data are all from 2011-2012. Niger's population has grown from ~17M to ~27M since then. Urbanization patterns have shifted (Niamey, Maradi, Zinder have expanded significantly). Agricultural land use has changed with climate variability.
+
+**Concrete impact**: the model's spatial patterns (which departments are poor vs less poor) are probably still broadly valid, but the absolute wealth estimates are stale. This is a methodological validation, not a current poverty map. Applying it today would require retraining on recent data.
+
+### 2. Small CNN sample (476 patches)
+
+A ResNet-18 has 11 million parameters. Training it on 476 patches gives a parameter-to-observation ratio of about 23,000:1. The Group 5-fold CV helps detect overfitting, but it does not eliminate the fundamental constraint: the model sees very few examples of each type of landscape (urban, rural, Sahel, desert).
+
+**Concrete impact**: the R² of 0.69 may not generalize to regions or countries beyond Niger. Papers like Yeh et al. (2020) use 20,000+ clusters across multiple countries. Our single-country setup with 476 clusters is at the low end of what is feasible.
+
+### 3. Ten departments with only 1 cluster
+
+Out of 61 departments with DHS data, 10 have exactly one cluster (14 to 66 households). For these departments, the within-cluster variance cannot be estimated properly. The Fay-Herriot model compensates by giving nearly all weight to the synthetic component (gamma near 0).
+
+**Concrete impact**: these 10 departments contribute little to the CV improvement. Their estimates are essentially the regression prediction, not the blended EBLUP. They are flagged in `fh_results_details.csv` for transparency. If you remove them, the reported CV improves slightly, but the model is doing less work.
+
+### 4. Only 3 predictors in the FH model
+
+Urbanization rate, NDVI, and CNN score are the only auxiliary variables. This is a thin set compared to similar studies. Yeh et al. (2020) use 150+ features. We do not capture:
+
+- **Economic shocks**: drought frequency, conflict events, inflation, remittances
+- **Infrastructure**: road density, market access, school proximity
+- **Demographics**: population density, ethnic composition, migration
+
+**Concrete impact**: the FH model's synthetic component is structurally simple. It captures the spatial pattern of poverty that correlates with greenness and built-up areas, but it cannot explain sudden changes due to drought, conflict, or policy.
+
+### 5. No spatial autocorrelation test
+
+The Fay-Herriot model assumes independent sampling errors across areas. In reality, neighboring departments in Niger share similar agro-ecological conditions, market access, and livelihood systems. If residuals are spatially correlated, the standard errors of the EBLUP are underestimated.
+
+**Concrete impact**: the reported CV of 11.9% might be 13-14% if spatial dependence were accounted for. This is a known limitation of the basic FH model. Extensions like the spatial FH (SFH) or STAR models exist but add complexity.
+
+### 6. Landsat 7 limitations
+
+Landsat 7 has a scan line corrector failure (SLC-off) since 2003, creating data gaps (stripes) in every scene. The median composite across multiple scenes mitigates this, but some patches still have missing pixels. Newer missions (Landsat 8/9, Sentinel-2) would provide cleaner data.
+
+### 7. Generalization beyond Niger
+
+The model is trained and tested only on Niger. The landscape, settlement patterns, and wealth distribution of Niger are distinct from coastal West Africa (Nigeria, Ghana, Côte d'Ivoire) or East Africa. The 0.69 R² and 11.9% CV do not transfer to other countries without retraining.
 
 ---
 
 ## Data Sources
 
-| Source                  | Description                                              | Access                                     |
-| ----------------------- | -------------------------------------------------------- | ------------------------------------------ |
-| DHS 2012 (NIHR61FL)     | Household survey, 10,750 households, 476 clusters        | Restricted (DHS Program, registered users) |
-| GPS clusters (NIGE61FL) | Cluster coordinates with random displacement             | Restricted (DHS Program)                   |
-| Admin 2 Niger           | 67 department boundaries                                 | Public (HDX, OCHA, Creative Commons)       |
-| Landsat 7 (GEE)         | Surface reflectance, 30m resolution, 2011-2012 composite | Public (USGS, via Google Earth Engine)     |
-| MODIS MOD13A3           | Monthly NDVI at 1km, 2011-2012 average                   | Public (NASA, via MODISTools)              |
-| VIIRS/DMSP-OLS          | Nightlights, 500m/1km, 2012 annual composite             | Public (NOAA, via Google Earth Engine)     |
+| Source | What for | Access |
+|---|---|---|
+| DHS 2012 (NIHR61FL) | Household wealth labels | Restricted (DHS Program) |
+| Landsat 7 (GEE) | RGB satellite patches | Public (USGS) |
+| MODIS MOD13A3 | NDVI per department | Public (NASA) |
+| Admin 2 Niger | Department boundaries | Public (HDX/OCHA) |
 
 ---
 
-## Notes on Reproducibility
+## Reproduce
 
-- DHS data is confidential and must be requested from the DHS Program
-  (dhsprogram.com). The raw .DTA and .SHP files are gitignored.
-- The 476 Landsat patches are regenerable via GEE (the JavaScript and
-  Colab notebook are provided).
-- Three departments have no DHS clusters (desert areas: Bilma, etc.) and
-  are excluded from estimation. This is standard for small area methods.
+```bash
+# 1. Prepare DHS data (requires restricted DHS files)
+Rscript scripts/preparer_donnees.R
+
+# 2. Train CNN (Kaggle GPU or local)
+python scripts/entrainer_resnet.py
+
+# 3. Run Fay-Herriot models
+Rscript scripts/fay_herriot.R
+```
+
+Or use the Kaggle notebook: `pipeline_kaggle.ipynb`.
+
+Note: three desert departments (Bilma, etc.) have no DHS clusters and are excluded. The Landsat patches are regenerable via GEE (JS and Colab notebook provided).
 
 ---
 
 ## References
 
-- Fay, R. E., & Herriot, R. A. (1979). Estimates of income for small places:
-  An application of James-Stein procedures to census data. *Journal of the
-  American Statistical Association*, 74(366), 269-277.
-- Jean, N., Burke, M., Xie, M., Davis, W. M., Lobell, D. B., & Ermon, S.
-  (2016). Combining satellite imagery and machine learning to predict poverty.
-  *Science*, 353(6301), 790-794.
-- Yeh, C., Perez, A., Driscoll, A., Azzari, G., Tang, Z., Lobell, D., ...
-  & Ermon, S. (2020). Using publicly available satellite imagery and deep
-  learning to understand economic well-being in Africa. *Nature
-  Communications*, 11, 2583.
-- Rao, J. N. K., & Molina, I. (2015). *Small Area Estimation* (2nd ed.).
-  Wiley.
-- He, K., Zhang, X., Ren, S., & Sun, J. (2016). Deep residual learning for
-  image recognition. *CVPR 2016*.
-- Edochie, I., Newhouse, D., & Cochinard, F. (2024). Small area estimation
-  of poverty under high volatility. *World Bank Policy Research Working Paper*.
+- Fay & Herriot (1979). Estimates of income for small places. *JASA*, 74(366), 269-277.
+- Jean et al. (2016). Combining satellite imagery and ML to predict poverty. *Science*, 353(6301), 790-794.
+- Yeh et al. (2020). Using satellite imagery to understand economic well-being in Africa. *Nature Communications*, 11, 2583.
+- Rao & Molina (2015). *Small Area Estimation* (2nd ed.). Wiley.
+- He et al. (2016). Deep residual learning for image recognition. *CVPR 2016*.
