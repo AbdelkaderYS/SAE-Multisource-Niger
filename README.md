@@ -1,5 +1,12 @@
 # Poverty Estimation in Niger with Satellite Imagery and Small Area Estimation
 
+
+> ### *Predict poverty across Niger's 64 departments from free satellite imagery, without costly household surveys!*
+
+> ### *Cibler les zones de pauvreté au Niger avec l'IA sur des images satellite, une alternative rapide et gratuite aux enquêtes ménages!*
+
+
+
 Combine DHS 2012 household surveys with Landsat 7 satellite imagery and a
 ResNet-18 neural network, then apply a Fay-Herriot small area model to estimate
 poverty at the department level (Admin 2, 64 departments) in Niger.
