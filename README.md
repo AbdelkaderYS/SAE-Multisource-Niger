@@ -11,11 +11,11 @@ of variation (CV) of 11.9 percent.
 
 ## Key Results
 
-| Model | Predictors | AIC | CV (%) | gamma |
-|-------|-----------|------|--------|-------|
-| FH-0 | None (mean only) | 1532.5 | 93.7 | 0.916 |
-| FH-1 | Urbanization rate | 1414.0 | 17.8 | 0.709 |
-| **FH-2** | Urbanization + NDVI + **CNN score** | **1325.9** | **11.9** | **0.455** |
+| Model          | Predictors                               | AIC              | CV (%)         | gamma           |
+| -------------- | ---------------------------------------- | ---------------- | -------------- | --------------- |
+| FH-0           | None (mean only)                         | 1532.5           | 93.7           | 0.916           |
+| FH-1           | Urbanization rate                        | 1414.0           | 17.8           | 0.709           |
+| **FH-2** | Urbanization + NDVI +**CNN score** | **1325.9** | **11.9** | **0.455** |
 
 - **CNN test R squared**: 0.69 (ResNet-18, 380 train / 96 test clusters)
 - **CNN test RMSE**: 49,904 (wealth index ranges from -70,000 to +465,000)
@@ -84,27 +84,28 @@ semantic patterns like roads, fields, and settlements) to adapt the network
 to satellite imagery.
 
 The original 1000-class classification head is replaced with a regression head:
+
 - Linear(512 -> 256) + ReLU + Dropout(0.3)
 - Linear(256 -> 1) for wealth prediction
 
 ### Training Setup
 
-| Hyperparameter | Value | Reason |
-|---------------|-------|--------|
-| Optimizer | Adam | Adaptive learning rate, standard for fine-tuning |
-| Learning rate | 0.0005 | 10x lower than typical, to avoid destroying pretrained weights |
-| Weight decay | 0.0001 | Light L2 regularization against overfitting |
-| Batch size | 32 | Fits T4 GPU memory (16 GB) |
-| Max epochs | 100 | Safety limit |
-| Early stopping | Patience 10 | Stops when validation loss plateaus |
-| LR scheduler | ReduceLROnPlateau | Halves LR every 5 epochs without improvement |
-| Test split | 20 percent | 380 train, 96 test clusters |
+| Hyperparameter | Value             | Reason                                                         |
+| -------------- | ----------------- | -------------------------------------------------------------- |
+| Optimizer      | Adam              | Adaptive learning rate, standard for fine-tuning               |
+| Learning rate  | 0.0005            | 10x lower than typical, to avoid destroying pretrained weights |
+| Weight decay   | 0.0001            | Light L2 regularization against overfitting                    |
+| Batch size     | 32                | Fits T4 GPU memory (16 GB)                                     |
+| Max epochs     | 100               | Safety limit                                                   |
+| Early stopping | Patience 10       | Stops when validation loss plateaus                            |
+| LR scheduler   | ReduceLROnPlateau | Halves LR every 5 epochs without improvement                   |
+| Test split     | 20 percent        | 380 train, 96 test clusters                                    |
 
 ### Data Augmentation (Training Only)
 
-- Random horizontal flip (50 percent chance) — satellite imagery has no
+- Random horizontal flip (50 percent chance): satellite imagery has no
   inherent orientation.
-- Random rotation up to 15 degrees — patches may come from different
+- Random rotation up to 15 degrees: patches may come from different
   satellite paths.
 - ImageNet normalization (mean and standard deviation per RGB channel).
 
@@ -140,9 +141,10 @@ spatially join 476 GPS cluster coordinates to department boundaries
 for each department.
 
 Produces:
-- `data/processed/direct_estimates_dept.csv` — 64 departments with mean
+
+- `data/processed/direct_estimates_dept.csv`: 64 departments with mean
   wealth, standard error, CV, and survey variance (psi).
-- `data/processed/clusters_gps.csv` — 476 clusters with coordinates,
+- `data/processed/clusters_gps.csv`: 476 clusters with coordinates,
   department ID, and wealth mean.
 
 ### Step 2: Export Landsat 7 Patches from Google Earth Engine
@@ -170,10 +172,11 @@ Run on Kaggle with a GPU accelerator (T4 or P100). The input is the
 float32, normalized to [0, 1]) and the labels from `labels.csv`.
 
 Produces:
-- `resnet18.pt` — trained model weights (44 MB).
-- `cnn_predictions_cluster.csv` — predicted wealth for all 476 clusters.
-- `cnn_metrics.csv` — test R squared and RMSE.
-- `cnn_pred_vs_true.png` — scatter plot of predictions vs actual values.
+
+- `resnet18.pt`: trained model weights (44 MB).
+- `cnn_predictions_cluster.csv`: predicted wealth for all 476 clusters.
+- `cnn_metrics.csv`: test R squared and RMSE.
+- `cnn_pred_vs_true.png` : scatter plot of predictions vs actual values.
 
 ### Step 4: Fay-Herriot Small Area Model
 
@@ -182,9 +185,9 @@ Produces:
 The Fay-Herriot model (Fay and Herriot, 1979) is a standard area-level
 small area estimation method. It combines:
 
-- **Direct estimate** (from DHS survey) — unbiased but high variance for
+- **Direct estimate** (from DHS survey), unbiased but high variance for
   small departments.
-- **Synthetic estimate** (from linear regression on auxiliary variables) —
+- **Synthetic estimate** (from linear regression on auxiliary variables):
   potentially biased but low variance.
 
 The model produces an Empirical Best Linear Unbiased Predictor (EBLUP)
@@ -198,21 +201,22 @@ where gamma_i is the shrinkage factor, close to 1 when the direct estimate
 is reliable (many households), close to 0 when the model dominates.
 
 Three models are compared:
+
 1. FH-0: intercept only (no auxiliary variables).
 2. FH-1: urbanization rate (percent urban households per department).
 3. FH-2: urbanization rate + NDVI + CNN score.
 
 ### Step 5: Outputs and Figures
 
-| File | Description |
-|------|-------------|
-| `outputs/tables/fh_results_comparison.csv` | AIC, CV, gamma for all 3 models |
-| `outputs/tables/fh_results_details.csv` | Per-department: direct, EBLUP, SE, gamma |
-| `outputs/figures/carte_wealth_direct.png` | Map of direct survey estimates by department |
-| `outputs/figures/carte_wealth_eblup.png` | Map of EBLUP estimates (FH-2) |
-| `outputs/figures/comparaison_modeles.png` | Bar chart comparing CV across models |
-| `outputs/figures/shrinkage_vs_taille.png` | Gamma vs number of clusters per department |
-| `outputs/figures/cnn_pred_vs_true.png` | ResNet-18 predictions vs actual wealth |
+| File                                         | Description                                  |
+| -------------------------------------------- | -------------------------------------------- |
+| `outputs/tables/fh_results_comparison.csv` | AIC, CV, gamma for all 3 models              |
+| `outputs/tables/fh_results_details.csv`    | Per-department: direct, EBLUP, SE, gamma     |
+| `outputs/figures/carte_wealth_direct.png`  | Map of direct survey estimates by department |
+| `outputs/figures/carte_wealth_eblup.png`   | Map of EBLUP estimates (FH-2)                |
+| `outputs/figures/comparaison_modeles.png`  | Bar chart comparing CV across models         |
+| `outputs/figures/shrinkage_vs_taille.png`  | Gamma vs number of clusters per department   |
+| `outputs/figures/cnn_pred_vs_true.png`     | ResNet-18 predictions vs actual wealth       |
 
 ---
 
@@ -253,13 +257,13 @@ poverty_sae_satellite/
 
 ## Data Sources
 
-| Source | Description | Access |
-|--------|-------------|--------|
-| DHS 2012 (NIHR61FL) | Household survey, 10,750 households, 476 clusters | Restricted (DHS Program, registered users) |
-| GPS clusters (NIGE61FL) | Cluster coordinates with random displacement | Restricted (DHS Program) |
-| Admin 2 Niger | 67 department boundaries | Public (HDX, OCHA, Creative Commons) |
-| Landsat 7 (GEE) | Surface reflectance, 30m resolution, 2011-2012 composite | Public (USGS, via Google Earth Engine) |
-| MODIS MOD13A3 | Monthly NDVI at 1km, 2011-2012 average | Public (NASA, via MODISTools) |
+| Source                  | Description                                              | Access                                     |
+| ----------------------- | -------------------------------------------------------- | ------------------------------------------ |
+| DHS 2012 (NIHR61FL)     | Household survey, 10,750 households, 476 clusters        | Restricted (DHS Program, registered users) |
+| GPS clusters (NIGE61FL) | Cluster coordinates with random displacement             | Restricted (DHS Program)                   |
+| Admin 2 Niger           | 67 department boundaries                                 | Public (HDX, OCHA, Creative Commons)       |
+| Landsat 7 (GEE)         | Surface reflectance, 30m resolution, 2011-2012 composite | Public (USGS, via Google Earth Engine)     |
+| MODIS MOD13A3           | Monthly NDVI at 1km, 2011-2012 average                   | Public (NASA, via MODISTools)              |
 
 ---
 
@@ -269,8 +273,6 @@ poverty_sae_satellite/
   (dhsprogram.com). The raw .DTA and .SHP files are gitignored.
 - The 476 Landsat patches are regenerable via GEE (the JavaScript and
   Colab notebook are provided).
-- The ResNet-18 training on Kaggle takes approximately 1 hour on a T4 GPU
-  and produces regenerable outputs.
 - Three departments have no DHS clusters (desert areas: Bilma, etc.) and
   are excluded from estimation. This is standard for small area methods.
 
