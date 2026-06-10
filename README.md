@@ -200,17 +200,18 @@ EBLUP_i = gamma_i * direct_i + (1 - gamma_i) * synthetic_i
 where gamma_i is the shrinkage factor, close to 1 when the direct estimate
 is reliable (many households), close to 0 when the model dominates.
 
-Three models are compared:
+Four models are compared:
 
 1. FH-0: intercept only (no auxiliary variables).
 2. FH-1: urbanization rate (percent urban households per department).
 3. FH-2: urbanization rate + NDVI + CNN score.
+4. FH-3: urbanization rate + NDVI + CNN score + nightlights *(planned)*.
 
 ### Step 5: Outputs and Figures
 
 | File                                         | Description                                  |
 | -------------------------------------------- | -------------------------------------------- |
-| `outputs/tables/fh_results_comparison.csv` | AIC, CV, gamma for all 3 models              |
+| `outputs/tables/fh_results_comparison.csv` | AIC, CV, gamma for all fitted models         |
 | `outputs/tables/fh_results_details.csv`    | Per-department: direct, EBLUP, SE, gamma     |
 | `outputs/figures/carte_wealth_direct.png`  | Map of direct survey estimates by department |
 | `outputs/figures/carte_wealth_eblup.png`   | Map of EBLUP estimates (FH-2)                |
@@ -264,6 +265,7 @@ poverty_sae_satellite/
 | Admin 2 Niger           | 67 department boundaries                                 | Public (HDX, OCHA, Creative Commons)       |
 | Landsat 7 (GEE)         | Surface reflectance, 30m resolution, 2011-2012 composite | Public (USGS, via Google Earth Engine)     |
 | MODIS MOD13A3           | Monthly NDVI at 1km, 2011-2012 average                   | Public (NASA, via MODISTools)              |
+| VIIRS/DMSP-OLS          | Nightlights, 500m/1km, 2012 annual composite             | Public (NOAA, via Google Earth Engine)     |
 
 ---
 

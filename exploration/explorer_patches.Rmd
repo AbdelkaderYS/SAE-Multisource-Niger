@@ -5,20 +5,9 @@ output: html_notebook
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = "center")
-```
+knitr::opts_knit$set(root.dir = normalizePath(".."))
 
-Ce notebook affiche les patches Landsat 7 téléchargés via
-`scripts/telecharger_landsat.py`.
-
-Pour afficher les images, R nécessite `reticulate` + `numpy`. 
-Si ces paquets ne sont pas disponibles, les stats textuelles s'affichent quand même.
-
-```{r python-check, include=FALSE}
-has_python <- tryCatch({
-  suppressPackageStartupMessages(library(reticulate))
-  np <- import("numpy")
-  TRUE
-}, error = function(e) FALSE)
+has_terra <- requireNamespace("terra", quietly = TRUE)
 ```
 
 ## Charger les clusters
@@ -28,7 +17,7 @@ clusters <- read.csv("data/processed/clusters_gps.csv")
 cat("Nombre de clusters :", nrow(clusters), "\n")
 
 patch_dir <- "data/processed/patches_landsat"
-n_patches <- length(list.files(patch_dir, pattern = "\\.npy$"))
+n_patches <- length(list.files(patch_dir, pattern = "\\.tif$"))
 cat("Patches disponibles :", n_patches, "/", nrow(clusters), "\n")
 ```
 
@@ -36,87 +25,87 @@ cat("Patches disponibles :", n_patches, "/", nrow(clusters), "\n")
 
 ## Afficher un patch au hasard
 
-```{r random-patch, fig.height=5, fig.width=5, eval=has_python}
+```{r random-patch, fig.height=5, fig.width=5, eval=has_terra}
+library(terra)
+
 set.seed(42)
 idx <- sample(nrow(clusters), 1)
 cid <- clusters$cluster[idx]
 wealth <- round(clusters$wealth_mean[idx], 3)
 
-patch_path <- file.path(patch_dir, paste0(cid, ".npy"))
-if (file.exists(patch_path)) {
-  patch <- np$load(patch_path)
-  if (length(dim(patch)) == 3 && dim(patch)[1] == 3) {
-    patch <- aperm(patch, c(2, 3, 1))
-  }
-  patch <- py_to_r(patch)
-  patch <- (patch - min(patch)) / (max(patch) - min(patch))
+patch_file <- file.path(patch_dir, paste0("cluster_", sprintf("%03d", cid), ".tif"))
+
+if (file.exists(patch_file)) {
+  r <- rast(patch_file)
+  
+  # terra retourne deja (H, W, C)
+  rgb <- as.array(r)
+  
+  # Normaliser pour l'affichage
+  rgb <- (rgb - min(rgb)) / (max(rgb) - min(rgb))
   
   par(mar = c(1, 1, 2, 1))
-  plot(as.raster(patch))
+  plot(as.raster(rgb))
   title(main = paste0("Cluster ", cid, " | Richesse = ", wealth))
 } else {
   cat("Patch non trouvé pour le cluster", cid, "\n")
 }
 ```
 
-```{r no-python-fallback, eval=!has_python}
-cat("Python (reticulate + numpy) non disponible.\n")
-cat("Installer avec : install.packages('reticulate')\n")
-cat("puis : pip install numpy\n")
+```{r no-terra-fallback, eval=!has_terra}
+cat("Paquet 'terra' non disponible.\n")
+cat("Installer avec : install.packages('terra')\n")
 ```
 
 ---
 
 ## Comparer clusters riches vs pauvres
 
-```{r rich-vs-poor, fig.height=8, fig.width=6, eval=has_python}
-label_file <- file.path(patch_dir, "labels.csv")
-if (file.exists(label_file)) {
-  cluster_label <- read.csv(label_file)
-  
-  top_poor <- head(cluster_label$cluster[order(cluster_label$wealth_mean)], 3)
-  top_rich <- tail(cluster_label$cluster[order(cluster_label$wealth_mean)], 3)
-  
-  patch_file <- function(cid) {
-    p <- file.path(patch_dir, paste0(cid, ".npy"))
-    if (file.exists(p)) {
-      arr <- np$load(p)
-      if (length(dim(arr)) == 3 && dim(arr)[1] == 3) {
-        arr <- aperm(arr, c(2, 3, 1))
-      }
-      arr <- py_to_r(arr)
-      arr <- (arr - min(arr)) / (max(arr) - min(arr))
-    } else {
-      NULL
-    }
+```{r rich-vs-poor, fig.height=8, fig.width=6, eval=has_terra}
+library(terra)
+
+cluster_wealth <- read.csv("data/processed/clusters_gps.csv")
+
+top_poor <- head(cluster_wealth$cluster[order(cluster_wealth$wealth_mean)], 3)
+top_rich <- tail(cluster_wealth$cluster[order(cluster_wealth$wealth_mean)], 3)
+
+read_patch <- function(cid) {
+  f <- file.path(patch_dir, paste0("cluster_", sprintf("%03d", cid), ".tif"))
+  if (file.exists(f)) {
+    r <- rast(f)
+    # terra retourne deja (H, W, C)
+    rgb <- as.array(r)
+    rgb[is.na(rgb)] <- 0
+    # Normaliser pour l'affichage
+    rgb <- (rgb - min(rgb)) / (max(rgb) - min(rgb) + 1e-8)
+    return(rgb)
   }
-  
-  par(mfrow = c(2, 3), mar = c(1, 1, 2, 1))
-  
-  for (cid in top_poor) {
-    wealth <- cluster_label$wealth_mean[cluster_label$cluster == cid]
-    p <- patch_file(cid)
-    if (!is.null(p)) {
-      plot(as.raster(p))
-      title(main = paste0("PAUVRE : Cluster ", cid, " (", round(wealth, 2), ")"))
-    }
+  NULL
+}
+
+par(mfrow = c(2, 3), mar = c(1, 1, 2, 1))
+
+for (cid in top_poor) {
+  wealth <- cluster_wealth$wealth_mean[cluster_wealth$cluster == cid]
+  p <- read_patch(cid)
+  if (!is.null(p)) {
+    plot(as.raster(p))
+    title(main = paste0("PAUVRE : Cluster ", cid, " (", round(wealth, 2), ")"))
   }
-  for (cid in top_rich) {
-    wealth <- cluster_label$wealth_mean[cluster_label$cluster == cid]
-    p <- patch_file(cid)
-    if (!is.null(p)) {
-      plot(as.raster(p))
-      title(main = paste0("RICHE : Cluster ", cid, " (", round(wealth, 2), ")"))
-    }
+}
+for (cid in top_rich) {
+  wealth <- cluster_wealth$wealth_mean[cluster_wealth$cluster == cid]
+  p <- read_patch(cid)
+  if (!is.null(p)) {
+    plot(as.raster(p))
+    title(main = paste0("RICHE : Cluster ", cid, " (", round(wealth, 2), ")"))
   }
-} else {
-  cat("Fichier labels.csv non trouvé\n")
 }
 ```
 
 ---
 
-## Vérification : distribution spatiale des clusters avec/sans patch
+## Verification : distribution spatiale des clusters avec/sans patch
 
 ```{r spatial-check}
 library(sf)
@@ -125,16 +114,15 @@ library(dplyr)
 
 gps <- st_read("data/raw/NIGE61FL.shp", quiet = TRUE)
 
-presence <- data.frame(cluster = as.integer(gps$DHSCLUST))
-presence$patch_present <- file.exists(
-  file.path(patch_dir, paste0(presence$cluster, ".npy"))
-)
-
 gps <- gps %>%
-  mutate(cluster = as.integer(DHSCLUST)) %>%
-  left_join(presence, by = "cluster")
+  mutate(
+    cluster = as.integer(DHSCLUST),
+    patch_present = file.exists(
+      file.path(patch_dir, paste0("cluster_", sprintf("%03d", cluster), ".tif"))
+    )
+  )
 
-cat("Clusters avec patch :", sum(presence$patch_present), "/", nrow(presence), "\n")
+cat("Clusters avec patch :", sum(gps$patch_present), "/", nrow(gps), "\n")
 
 ggplot() +
   geom_sf(data = gps, aes(color = patch_present), size = 1.5, alpha = 0.7) +
@@ -144,7 +132,7 @@ ggplot() +
     name = "Statut"
   ) +
   labs(
-    title = "Couverture des patches Landsat",
+    title = "Couverture des patches Landsat 7",
     x = "Longitude", y = "Latitude"
   ) +
   theme_bw()
@@ -158,7 +146,7 @@ ggplot() +
 if (n_patches > 0) {
   cluster_wealth <- read.csv("data/processed/clusters_gps.csv")
   cluster_wealth$has_patch <- file.exists(
-    file.path(patch_dir, paste0(cluster_wealth$cluster, ".npy"))
+    file.path(patch_dir, paste0("cluster_", sprintf("%03d", cluster_wealth$cluster), ".tif"))
   )
   
   with_patch <- cluster_wealth %>% filter(has_patch)

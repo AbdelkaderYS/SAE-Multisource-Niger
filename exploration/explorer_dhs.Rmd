@@ -5,11 +5,13 @@ output: html_notebook
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = "center")
+knitr::opts_knit$set(root.dir = normalizePath(".."))
 suppressPackageStartupMessages({
   library(dplyr)
   library(ggplot2)
   library(sf)
   library(haven)
+  library(survey)
 })
 ```
 
@@ -171,7 +173,6 @@ ggplot(effectifs, aes(x = n_clusters)) +
 ## Richesse moyenne par région (pondérée)
 
 ```{r direct-by-region}
-library(survey)
 design <- svydesign(ids = ~hv001, weights = ~hv005, data = dhs, nest = TRUE)
 direct_reg <- svyby(~hv271, ~region_label, design, svymean) %>%
   rename(region = region_label, wealth = hv271, se = se) %>%
