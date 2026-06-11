@@ -5,9 +5,8 @@ data/raw/DHS_README.txt
 data/raw/GPS_Displacement_README.txt
 
 # Regenerable intermediate data
-data/processed/patches_landsat/
-data/processed/households_dept.rds
-outputs/models/*.pt
+data/processed/
+outputs/
 poverty_sae_kaggle.zip
 
 # Colab/Kaggle download artifacts
@@ -40,3 +39,8 @@ Thumbs.db
 
 # Agent context (project memory, not for remote)
 AGENTS.md
+
+# Exploration notebooks (reproducible; only explorer_dhs.Rmd is tracked)
+exploration/explorer_enrichi.Rmd
+exploration/explorer_modis.Rmd
+exploration/explorer_patches.Rmd

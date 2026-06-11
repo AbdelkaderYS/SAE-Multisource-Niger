@@ -1,9 +1,0 @@
-metric,value
-r2_mean_cv,0.319821487010526
-r2_std_cv,0.1560135565154113
-r2_global_oof,0.48229379224693714
-rmse_mean_cv,58538.986542622864
-rmse_std_cv,16678.467472542037
-rmse_global_oof,60891.311837144065
-n_clusters,476.0
-n_folds,5.0
