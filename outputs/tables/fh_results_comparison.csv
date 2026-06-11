@@ -1,4 +1,6 @@
-"modele","sigma2_v","AIC","BIC","gamma_moyen","cv_moyen_direct","cv_moyen_eblup"
-"FH-0 (moyenne seule)",1201167568.2305,1532.5,1536.9,0.916,80.9,93.7
-"FH-1 (urban_pct)",136516644.2682,1414,1420.5,0.709,80.9,17.8
-"FH-2 (urban_pct + ndvi + cnn)",18506895.1236,1325.9,1336.7,0.455,80.9,11.9
+"modele","sigma2_v","AIC","BIC","gamma_moyen","cv_moyen_eblup","cv_ic_bas","cv_ic_haut"
+"FH-0 (moyenne seule)",1201167568.2305,1532.5,1536.9,0.916,93.7,NA,NA
+"FH-1 (urban_pct)",136516644.2682,1414,1420.5,0.709,17.8,NA,NA
+"FH-1b (urban_pct + ndvi)",139734905.7042,1416.1,1424.7,0.712,18.1,NA,NA
+"FH-1c (urban_pct + cnn)",32426454.398,1355,1363.7,0.523,11.1,7.4,15.2
+"FH-2 (urban_pct + ndvi + cnn)",33151556.0457,1356.8,1367.6,0.526,11.4,NA,NA

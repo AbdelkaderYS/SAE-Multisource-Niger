@@ -44,7 +44,8 @@ def load_patch(cluster_id, patch_dir):
     tif_path = os.path.join(patch_dir, f"cluster_{int(cluster_id):03d}.tif")
 
     if os.path.exists(npy_path):
-        return np.load(npy_path).astype(np.float32)
+        patch = np.load(npy_path).astype(np.float32)
+        return np.nan_to_num(patch, nan=0.0)
 
     if os.path.exists(tif_path):
         import rasterio
@@ -52,6 +53,7 @@ def load_patch(cluster_id, patch_dir):
             patch = src.read()
         # (C, H, W) -> (H, W, C)
         patch = np.transpose(patch, (1, 2, 0)).astype(np.float32)
+        patch = np.nan_to_num(patch, nan=0.0)
         # Normalisation percentile [0, 1]
         p2, p98 = np.percentile(patch, [2, 98])
         patch = np.clip((patch - p2) / (p98 - p2 + 1e-8), 0, 1)
@@ -71,10 +73,15 @@ def train_one_fold(train_idx, test_idx, labels_df, patch_dir, device, fold):
     train_df = labels_df.iloc[train_idx].reset_index(drop=True)
     test_df = labels_df.iloc[test_idx].reset_index(drop=True)
 
+    y_mean = train_df["wealth_mean"].mean()
+    y_std = train_df["wealth_mean"].std()
+
     class LandsatDataset(Dataset):
-        def __init__(self, df, patch_dir, transform=None):
+        def __init__(self, df, patch_dir, y_mean, y_std, transform=None):
             self.df = df
             self.patch_dir = patch_dir
+            self.y_mean = y_mean
+            self.y_std = y_std
             self.transform = transform
 
         def __len__(self):
@@ -89,22 +96,25 @@ def train_one_fold(train_idx, test_idx, labels_df, patch_dir, device, fold):
             patch = torch.from_numpy(patch).permute(2, 0, 1).float()
             if self.transform:
                 patch = self.transform(patch)
-            return patch, torch.tensor(row["wealth_mean"], dtype=torch.float32)
+            target = (row["wealth_mean"] - self.y_mean) / (self.y_std + 1e-8)
+            return patch, torch.tensor(target, dtype=torch.float32)
 
     IMAGENET_MEAN = [0.485, 0.456, 0.406]
     IMAGENET_STD = [0.229, 0.224, 0.225]
 
     train_transform = T.Compose([
+        T.Resize((224, 224)),
         T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
         T.RandomHorizontalFlip(p=0.5),
         T.RandomRotation(15),
     ])
     test_transform = T.Compose([
+        T.Resize((224, 224)),
         T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
     ])
 
-    train_ds = LandsatDataset(train_df, patch_dir, transform=train_transform)
-    test_ds = LandsatDataset(test_df, patch_dir, transform=test_transform)
+    train_ds = LandsatDataset(train_df, patch_dir, y_mean, y_std, transform=train_transform)
+    test_ds = LandsatDataset(test_df, patch_dir, y_mean, y_std, transform=test_transform)
 
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
     test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
@@ -186,7 +196,8 @@ def train_one_fold(train_idx, test_idx, labels_df, patch_dir, device, fold):
             trues.extend(y.numpy())
 
     from sklearn.metrics import r2_score, mean_squared_error
-    preds = np.array(preds); trues = np.array(trues)
+    preds = np.array(preds) * y_std + y_mean
+    trues = np.array(trues) * y_std + y_mean
     rmse = float(np.sqrt(mean_squared_error(trues, preds)))
     r2 = float(r2_score(trues, preds))
     print(f"  Fold {fold} -> R² = {r2:.3f}, RMSE = {rmse:.1f}")
@@ -367,10 +378,15 @@ def main():
     import torchvision.models as models
     import torchvision.transforms as T
 
+    y_full_mean = labels["wealth_mean"].mean()
+    y_full_std = labels["wealth_mean"].std()
+
     class LandsatDatasetFull(Dataset):
-        def __init__(self, df, patch_dir, transform=None):
+        def __init__(self, df, patch_dir, y_mean, y_std, transform=None):
             self.df = df.reset_index(drop=True)
             self.patch_dir = patch_dir
+            self.y_mean = y_mean
+            self.y_std = y_std
             self.transform = transform
 
         def __len__(self):
@@ -382,20 +398,23 @@ def main():
             patch = torch.from_numpy(patch).permute(2, 0, 1).float()
             if self.transform:
                 patch = self.transform(patch)
-            return patch, torch.tensor(row["wealth_mean"], dtype=torch.float32)
+            target = (row["wealth_mean"] - self.y_mean) / (self.y_std + 1e-8)
+            return patch, torch.tensor(target, dtype=torch.float32)
 
     IMAGENET_MEAN = [0.485, 0.456, 0.406]
     IMAGENET_STD = [0.229, 0.224, 0.225]
     train_transform = T.Compose([
+        T.Resize((224, 224)),
         T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
         T.RandomHorizontalFlip(p=0.5),
         T.RandomRotation(15),
     ])
     test_transform = T.Compose([
+        T.Resize((224, 224)),
         T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
     ])
 
-    full_ds = LandsatDatasetFull(labels, PATCH_DIR, transform=train_transform)
+    full_ds = LandsatDatasetFull(labels, PATCH_DIR, y_full_mean, y_full_std, transform=train_transform)
     full_loader = DataLoader(full_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
 
     model = models.resnet18(weights="DEFAULT")
@@ -438,7 +457,7 @@ def main():
 
     # Predire sur tous les clusters
     model.eval()
-    eval_ds = LandsatDatasetFull(labels, PATCH_DIR, transform=test_transform)
+    eval_ds = LandsatDatasetFull(labels, PATCH_DIR, y_full_mean, y_full_std, transform=test_transform)
     eval_loader = DataLoader(eval_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
     all_full_preds = []
     with torch.no_grad():
@@ -446,6 +465,7 @@ def main():
             x = x.to(device)
             pred = model(x).squeeze(-1).cpu().numpy()
             all_full_preds.extend(pred)
+    all_full_preds = np.array(all_full_preds) * y_full_std + y_full_mean
 
     pd.DataFrame({
         "cluster": labels["cluster"].values,

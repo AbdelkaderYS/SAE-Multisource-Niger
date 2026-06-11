@@ -6,8 +6,12 @@ data/raw/GPS_Displacement_README.txt
 
 # Regenerable intermediate data
 data/processed/patches_landsat/
+data/processed/households_dept.rds
 outputs/models/*.pt
 poverty_sae_kaggle.zip
+
+# Colab/Kaggle download artifacts
+outputs-2026*.zip
 
 # Python
 __pycache__/
@@ -26,6 +30,9 @@ venv/
 
 # Generated shapefiles
 data/raw/ner_admin1.*
+
+# Temp files
+/tmp/
 
 # OS
 .DS_Store

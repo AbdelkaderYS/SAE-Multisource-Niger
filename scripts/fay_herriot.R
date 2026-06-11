@@ -126,6 +126,7 @@ fit_model <- function(formula, label) {
 
     list(
       label = label,
+      formula = formula,
       sigma2_v = sigma2_v,
       aic = aic,
       bic = bic,
@@ -163,7 +164,10 @@ models <- Filter(Negate(is.null), models)
 
 # 5. Bootstrap IC pour le CV du meilleur modele
 cat("\n=== 5. Bootstrap IC pour le CV ===\n")
-best_idx <- length(models)
+cv_means <- sapply(models, function(m) mean(m$cv_eblup, na.rm = TRUE))
+best_idx <- which.min(cv_means)
+best_formula <- models[[best_idx]]$formula
+cat(sprintf("Meilleur modele : %s (CV = %.1f%%)\n", models[[best_idx]]$label, cv_means[best_idx]))
 n_boot <- 1000
 boot_cv <- numeric(n_boot)
 
@@ -172,13 +176,13 @@ for (b in 1:n_boot) {
   boot_data <- sae[idx, ]
   tryCatch({
     fit <- sae::eblupFH(
-      formula = direct_mean ~ urban_pct + ndvi_mean + cnn_score,
+      formula = best_formula,
       vardir = psi,
       data = boot_data,
       method = "REML"
     )
     mse <- sae::mseFH(
-      formula = direct_mean ~ urban_pct + ndvi_mean + cnn_score,
+      formula = best_formula,
       vardir = psi,
       data = boot_data,
       method = "REML"
@@ -195,7 +199,7 @@ for (b in 1:n_boot) {
 boot_cv <- na.omit(boot_cv)
 cv_ci <- quantile(boot_cv, probs = c(0.025, 0.975), na.rm = TRUE)
 cat(sprintf("Bootstrap (%d iterations) :\n", length(boot_cv)))
-cat(sprintf("  CV moyen = %.1f%%\n", mean(boot_cv)))
+cat(sprintf("  CV median = %.1f%%\n", median(boot_cv)))
 cat(sprintf("  IC 95%%  = [%.1f%%, %.1f%%]\n", cv_ci[1], cv_ci[2]))
 
 # CV moyen sans les departs a 1 cluster
@@ -203,13 +207,13 @@ sae_no1 <- sae %>% filter(flag_1cluster == 0)
 if (nrow(sae_no1) > 0) {
   tryCatch({
     fit_no1 <- sae::eblupFH(
-      direct_mean ~ urban_pct + ndvi_mean + cnn_score,
+      best_formula,
       vardir = psi,
       data = sae_no1,
       method = "REML"
     )
     mse_no1 <- sae::mseFH(
-      direct_mean ~ urban_pct + ndvi_mean + cnn_score,
+      best_formula,
       vardir = psi,
       data = sae_no1,
       method = "REML"
@@ -240,8 +244,8 @@ comparison <- do.call(rbind, lapply(models, function(m) {
 # Ajouter l'IC du bootstrap au meilleur modele
 comparison$cv_ic_bas <- NA
 comparison$cv_ic_haut <- NA
-comparison$cv_ic_bas[nrow(comparison)] <- round(cv_ci[1], 1)
-comparison$cv_ic_haut[nrow(comparison)] <- round(cv_ci[2], 1)
+comparison$cv_ic_bas[best_idx] <- round(cv_ci[1], 1)
+comparison$cv_ic_haut[best_idx] <- round(cv_ci[2], 1)
 
 print(comparison)
 write.csv(comparison, OUT_RESULTS, row.names = FALSE)
@@ -279,12 +283,12 @@ df_qq <- data.frame(
 p_qq <- ggplot(df_qq, aes(x = theoretical, y = sample)) +
   geom_point(color = "#1f77b4", size = 2.5) +
   geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
-  labs(title = "Q-Q plot of standardized residuals (FH-2)",
+  labs(title = paste0("Q-Q plot of standardized residuals (", best$label, ")"),
        x = "Theoretical quantiles (normal)",
        y = "Standardized residuals") +
   theme_bw()
 ggsave(file.path(OUT_FIG_DIR, "diag_qqplot.png"), p_qq, width = 6, height = 5, dpi = 200)
-cat("  Q-Q plot : output/figures/diag_qqplot.png\n")
+cat("  Q-Q plot : outputs/figures/diag_qqplot.png\n")
 
 # Residus vs valeurs ajustees
 df_resid <- data.frame(
@@ -294,12 +298,12 @@ df_resid <- data.frame(
 p_resid <- ggplot(df_resid, aes(x = fitted, y = resid)) +
   geom_point(size = 2.5, alpha = 0.7, color = "#1f77b4") +
   geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
-  labs(title = "Residuals vs fitted values (FH-2)",
+  labs(title = paste0("Residuals vs fitted values (", best$label, ")"),
        x = "Fitted values (EBLUP)",
        y = "Residuals") +
   theme_bw()
 ggsave(file.path(OUT_FIG_DIR, "diag_resid_fitted.png"), p_resid, width = 6, height = 5, dpi = 200)
-cat("  Residus vs fitted : output/figures/diag_resid_fitted.png\n")
+cat("  Residus vs fitted : outputs/figures/diag_resid_fitted.png\n")
 
 # 9. Figures existantes (cartes, comparaison)
 cat("\n=== 9. Figures ===\n")
